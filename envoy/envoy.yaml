@@ -1,0 +1,98 @@
+static_resources:
+  listeners:
+    - name: service1_to_service2_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 10000
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: s1_to_s2
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: service2_host
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/service2/"
+                          route:
+                            cluster: service2_cluster
+                            prefix_rewrite: "/" # quita /service2 al enviar al upstream
+                            timeout: 2s
+                            retry_policy:
+                              retry_on: 5xx,connect-failure,refused-stream
+                              num_retries: 3
+                              per_try_timeout: 1s
+                          typed_per_filter_config:
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              stat_prefix: http_local_rate_limiter
+                              token_bucket:
+                                max_tokens: 10
+                                tokens_per_fill: 10
+                                fill_interval: 1s
+                              filter_enabled:
+                                default_value:
+                                  { numerator: 100, denominator: HUNDRED }
+                              filter_enforced:
+                                default_value:
+                                  { numerator: 100, denominator: HUNDRED }
+                http_filters:
+                  - name: envoy.filters.http.local_ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                      stat_prefix: http_local_rate_limiter
+                      filter_enabled:
+                        default_value: { numerator: 100, denominator: HUNDRED }
+                      filter_enforced:
+                        default_value: { numerator: 100, denominator: HUNDRED }
+                      response_headers_to_add:
+                        - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          header:
+                            key: x-local-rate-limit
+                            value: "true"
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    - name: service2_cluster
+      connect_timeout: 1s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      circuit_breakers:
+        thresholds:
+          - priority: DEFAULT
+            max_connections: 2 # 1024
+            max_pending_requests: 2 # 1024
+            max_requests: 3 #2048
+            max_retries: 1 # 3
+      outlier_detection:
+        consecutive_5xx: 3
+        interval: 5s
+        base_ejection_time: 15s
+        max_ejection_percent: 50
+      load_assignment:
+        cluster_name: service2_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: service2
+                      port_value: 3002
+
+admin:
+  access_log_path: /tmp/admin_access.log
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901

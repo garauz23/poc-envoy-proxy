@@ -1,0 +1,41 @@
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.30-latest
+    container_name: envoy
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    command: >
+      /usr/local/bin/envoy
+      -c /etc/envoy/envoy.yaml
+      --log-level info
+    ports:
+      - "10000:10000" # listener para service1
+      - "9901:9901" # admin
+    depends_on:
+      - service2
+    networks:
+      - mesh
+
+  service1:
+    build: ./service1
+    container_name: service1
+    ports:
+      - "3001:3001"
+    environment:
+      - ENVOY_URL=http://envoy:10000
+    depends_on:
+      - envoy
+    networks:
+      - mesh
+
+  service2:
+    build: ./service2
+    container_name: service2
+    ports:
+      - "3002:3002"
+    networks:
+      - mesh
+
+networks:
+  mesh:
+    driver: bridge

@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Service1 Fargate + API Gateway"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: "dev"
+
+  Service1Image:
+    Type: String
+    Default: "123456789012.dkr.ecr.us-east-1.amazonaws.com/service1:latest"
+
+  Service1ContainerPort:
+    Type: Number
+    Default: 3000
+
+Resources:
+  ########################
+  # Imports base stack
+  ########################
+  VpcId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: "" # no se usa directo, solo para documentar
+  # (Realmente usaremos Fn::ImportValue)
+
+  Service1TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${EnvironmentName}-service1-task"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !ImportValue
+        Fn::Sub: "${EnvironmentName}-ECSTaskExecutionRoleArn"
+      ContainerDefinitions:
+        - Name: service1
+          Image: !Ref Service1Image
+          PortMappings:
+            - ContainerPort: !Ref Service1ContainerPort
+          Environment:
+            - Name: NODE_ENV
+              Value: !Ref EnvironmentName
+            # Aquí inyectarás el DNS del NLB de Envoy desde el Stack 03 (ImportValue)
+            - Name: ENVOY_NLB_ENDPOINT
+              Value: !ImportValue
+                Fn::Sub: "${EnvironmentName}-EnvoyNlbDNS"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub "/ecs/${EnvironmentName}/service1"
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: "service1"
+
+  Service1SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "SG Service1 ${EnvironmentName}"
+      VpcId: !ImportValue
+        Fn::Sub: "${EnvironmentName}-VpcId"
+      SecurityGroupIngress:
+        # Permitir tráfico desde API Gateway VPC link / NLB interno
+        - IpProtocol: tcp
+          FromPort: !Ref Service1ContainerPort
+          ToPort: !Ref Service1ContainerPort
+          CidrIp: 10.0.0.0/8
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+
+  Service1Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub: "${EnvironmentName}-ECSClusterName"
+      ServiceName: !Sub "${EnvironmentName}-service1"
+      LaunchType: FARGATE
+      DesiredCount: 2
+      TaskDefinition: !Ref Service1TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Split
+            - ","
+            - !ImportValue
+              Fn::Sub: "${EnvironmentName}-PrivateSubnets"
+          SecurityGroups:
+            - !Ref Service1SecurityGroup
+            - !ImportValue
+              Fn::Sub: "${EnvironmentName}-DefaultServiceSG"
+
+  ########################
+  # API Gateway HTTP API
+  ########################
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${EnvironmentName}-service1-api"
+      ProtocolType: HTTP
+
+  # Aquí simplifico usando un endpoint HTTP cualquiera, pero tú deberías:
+  # - Crear un NLB interno para Service1 o un VPC Link según tu patrón
+  # - O usar una integración privada a través de ALB/NLB + TargetGroup de Service1
+  HttpIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: HTTP_PROXY
+      IntegrationMethod: ANY
+      IntegrationUri: "http://example.com" # TODO: Cambia a tu NLB/ALB de Service1
+
+  HttpRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "ANY /{proxy+}"
+      Target: !Sub "integrations/${HttpIntegration}"
+
+  HttpStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: "$default"
+      AutoDeploy: true
+
+Outputs:
+  Service1ServiceName:
+    Value: !Ref Service1Service
+    Export:
+      Name: !Sub "${EnvironmentName}-Service1ServiceName"
+
+  Service1URL:
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+    Export:
+      Name: !Sub "${EnvironmentName}-Service1ApiUrl"

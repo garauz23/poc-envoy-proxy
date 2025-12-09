@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Service2 Fargate + Service Discovery"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: "dev"
+
+  Service2Image:
+    Type: String
+    Default: "123456789012.dkr.ecr.us-east-1.amazonaws.com/service2:latest"
+
+  Service2Port:
+    Type: Number
+    Default: 4000
+
+Resources:
+  ServiceDiscoveryNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: !Sub "${EnvironmentName}.local"
+      Vpc: !ImportValue
+        Fn::Sub: "${EnvironmentName}-VpcId"
+
+  Service2DiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: "service2"
+      NamespaceId: !Ref ServiceDiscoveryNamespace
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+
+  Service2TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${EnvironmentName}-service2-task"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !ImportValue
+        Fn::Sub: "${EnvironmentName}-ECSTaskExecutionRoleArn"
+      ContainerDefinitions:
+        - Name: service2
+          Image: !Ref Service2Image
+          PortMappings:
+            - ContainerPort: !Ref Service2Port
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub "/ecs/${EnvironmentName}/service2"
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: "service2"
+
+  Service2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "SG Service2 ${EnvironmentName}"
+      VpcId: !ImportValue
+        Fn::Sub: "${EnvironmentName}-VpcId"
+      SecurityGroupIngress:
+        # Permitir tráfico desde Envoy
+        - IpProtocol: tcp
+          FromPort: !Ref Service2Port
+          ToPort: !Ref Service2Port
+          CidrIp: 10.0.0.0/8
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+
+  Service2Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub: "${EnvironmentName}-ECSClusterName"
+      ServiceName: !Sub "${EnvironmentName}-service2"
+      LaunchType: FARGATE
+      DesiredCount: 2
+      TaskDefinition: !Ref Service2TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Split
+            - ","
+            - !ImportValue
+              Fn::Sub: "${EnvironmentName}-PrivateSubnets"
+          SecurityGroups:
+            - !Ref Service2SecurityGroup
+            - !ImportValue
+              Fn::Sub: "${EnvironmentName}-DefaultServiceSG"
+      ServiceRegistries:
+        - RegistryArn: !GetAtt Service2DiscoveryService.Arn
+
+Outputs:
+  Service2DiscoveryName:
+    Value: !Sub "service2.${EnvironmentName}.local"
+    Export:
+      Name: !Sub "${EnvironmentName}-Service2DiscoveryName"

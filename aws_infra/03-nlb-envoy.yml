@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NLB interno + Envoy Fargate"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: "dev"
+
+  EnvoyImage:
+    Type: String
+    Default: "123456789012.dkr.ecr.us-east-1.amazonaws.com/envoy:latest"
+
+  EnvoyListenerPort:
+    Type: Number
+    Default: 10000
+
+Resources:
+  EnvoyNlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: network
+      Scheme: internal
+      Subnets: !Split
+        - ","
+        - !ImportValue
+          Fn::Sub: "${EnvironmentName}-PrivateSubnets"
+
+  EnvoyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !ImportValue
+        Fn::Sub: "${EnvironmentName}-VpcId"
+      Port: !Ref EnvoyListenerPort
+      Protocol: TCP
+      TargetType: ip
+      HealthCheckProtocol: TCP
+      HealthCheckPort: !Ref EnvoyListenerPort
+
+  EnvoyListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref EnvoyNlb
+      Port: !Ref EnvoyListenerPort
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref EnvoyTargetGroup
+
+  EnvoyTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  EnvoyTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${EnvironmentName}-envoy-task"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !ImportValue
+        Fn::Sub: "${EnvironmentName}-ECSTaskExecutionRoleArn"
+      TaskRoleArn: !GetAtt EnvoyTaskRole.Arn
+      ContainerDefinitions:
+        - Name: envoy
+          Image: !Ref EnvoyImage
+          PortMappings:
+            - ContainerPort: !Ref EnvoyListenerPort
+          Environment:
+            # Service2 endpoint viene del stack 04 (service discovery) vía ImportValue
+            - Name: SERVICE2_DNS_NAME
+              Value: !ImportValue
+                Fn::Sub: "${EnvironmentName}-Service2DiscoveryName"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub "/ecs/${EnvironmentName}/envoy"
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: "envoy"
+          Command:
+            - "envoy"
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--service-cluster"
+            - !Sub "${EnvironmentName}-envoy"
+            - "--service-node"
+            - "node-1"
+
+  EnvoySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "SG Envoy ${EnvironmentName}"
+      VpcId: !ImportValue
+        Fn::Sub: "${EnvironmentName}-VpcId"
+      SecurityGroupIngress:
+        # Permitir tráfico desde la VPC (Service1)
+        - IpProtocol: tcp
+          FromPort: !Ref EnvoyListenerPort
+          ToPort: !Ref EnvoyListenerPort
+          CidrIp: 10.0.0.0/8
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+
+  EnvoyService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub: "${EnvironmentName}-ECSClusterName"
+      ServiceName: !Sub "${EnvironmentName}-envoy"
+      LaunchType: FARGATE
+      DesiredCount: 2
+      TaskDefinition: !Ref EnvoyTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Split
+            - ","
+            - !ImportValue
+              Fn::Sub: "${EnvironmentName}-PrivateSubnets"
+          SecurityGroups:
+            - !Ref EnvoySecurityGroup
+            - !ImportValue
+              Fn::Sub: "${EnvironmentName}-DefaultServiceSG"
+      LoadBalancers:
+        - ContainerName: envoy
+          ContainerPort: !Ref EnvoyListenerPort
+          TargetGroupArn: !Ref EnvoyTargetGroup
+
+Outputs:
+  EnvoyNlbDNS:
+    Value: !GetAtt EnvoyNlb.DNSName
+    Export:
+      Name: !Sub "${EnvironmentName}-EnvoyNlbDNS"
