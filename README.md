@@ -1,41 +1,16 @@
-🏗 Architecture Diagram
-          ┌──────────────────────┐
-          │      Client          │
-          └──────────┬───────────┘
-                     │ HTTP
-                     ▼
-        ┌──────────────────────────┐
-        │       Service1           │
-        │ (http://localhost:3001)  │
-        │ Calls ENVOY_URL          │───────┐
-        └──────────┬───────────────┘       │
-                   │                        │
-                   ▼                        │
-        ┌──────────────────────────┐        │
-        │         Envoy            │        │
-        │ (http://localhost:10000) │ ◀──────┘
-        │ Reverse Proxy Layer      │
-        └──────────┬──────────────┘
-                   │
-                   ▼
-        ┌──────────────────────────┐
-        │        Service2          │
-        │ (http://localhost:3002)  │
-        └──────────────────────────┘
+🚀 Envoy Real Prototype
 
-📁 Project Structure\
+Local Microservices Mesh using Docker Compose
 
-envoy-real-prototype/
-│
-├── docker-compose.yml
-│
-├── envoy/
-│   └── envoy.yaml
-│
-├── service1/
-│   ├── Dockerfile
-│   └── index.js
-│
-└── service2/
-    ├── Dockerfile
-    └── index.js
+API → Service1 → Envoy Proxy → Service2
+
+⸻
+
+📘 Overview
+
+This project is a local microservice mesh prototype using Envoy Proxy to route traffic between two independent services:
+	•	Service1 → Express API calling Envoy
+	•	Envoy → Reverse proxy forwarding requests to Service2
+	•	Service2 → Simple backend API
+
+This setup simulates a service mesh pattern, commonly used in ECS, Kubernetes, and service-to-service architectures.
