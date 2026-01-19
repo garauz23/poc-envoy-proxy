@@ -1,0 +1,34 @@
+version_info: "0"
+resources:
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: instance_1
+    connect_timeout: 5s
+    outlier_detection:
+      interval: 5s # cada 5 segundos Envoy evalua el estado de los hosts
+      base_ejection_time: 10s # Tiempo minimo que un host sera expulsado
+      max_ejection_percent: 100 # Porcentaje maximo que el host puede expulsar al mismo tiempo
+      enforcing_failure_percentage: 100 # Indica que tan estrictamente Envoy aplica la politica de failure percentage outlier detection Valores de 0 - 100 (0 no expulsa, 1-99 aplica la politica a un % de los casos, 100 siempre expulsa)
+      failure_percentage_threshold: 10 # % de errores que hace que un host sea candidato a expulsión
+      failure_percentage_request_volume: 10 # Cantidad minima de request para evaluar el porcentaje
+      failure_percentage_minimum_hosts: 2 # numero de host necesarios para activar la logica
+    load_assignment:
+      cluster_name: instance_1
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 127.0.0.1
+                    port_value: 4040
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 127.0.0.1
+                    port_value: 5050
+    circuit_breakers:
+      thresholds:
+        - priority: DEFAULT
+          max_connections: 2
+          max_pending_requests: 3
+          max_requests: 1
+          max_retries: 1

@@ -1,0 +1,17 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Create the S3 bucket used for Envoy dynamic config.
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Default: envoy-file-config
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+
+Outputs:
+  BucketName:
+    Value: !Ref S3BucketName

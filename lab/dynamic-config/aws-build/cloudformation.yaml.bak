@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploy Envoy with S3 sync sidecar to an existing ECS cluster.
+
+Parameters:
+  ClusterArn:
+    Type: String
+    Default: arn:aws:ecs:us-east-1:758208602079:cluster/super-test
+  EnvoyImage:
+    Type: String
+    Default: 758208602079.dkr.ecr.us-east-1.amazonaws.com/envoy:latest
+  S3BucketName:
+    Type: String
+    Default: envoy-file-config
+  S3Prefix:
+    Type: String
+    Default: ""
+  SyncInterval:
+    Type: Number
+    Default: 5
+  DesiredCount:
+    Type: Number
+    Default: 1
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  AssignPublicIp:
+    Type: String
+    Default: ENABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/envoy
+      RetentionInDays: 7
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ecsTaskExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ecsTaskRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReadConfig
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}"
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: envoy-dynamic
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: dynamic-config
+      ContainerDefinitions:
+        - Name: envoy
+          Image: !Ref EnvoyImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 10000
+              Protocol: tcp
+            - ContainerPort: 9901
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: dynamic-config
+              ContainerPath: /etc/envoy/dynamic
+              ReadOnly: true
+          Command:
+            - /bin/sh
+            - -c
+            - "until [ -f /etc/envoy/dynamic/cds.yaml ] && [ -f /etc/envoy/dynamic/lds.yaml ]; do echo \"waiting for dynamic config\"; sleep 2; done; exec /usr/local/bin/envoy -c /etc/envoy/envoy.yaml --log-level info"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/envoy
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: envoy
+        - Name: s3-sync
+          Image: amazon/aws-cli:2.15.0
+          Essential: false
+          EntryPoint:
+            - /bin/sh
+            - -c
+          Environment:
+            - Name: S3_BUCKET
+              Value: !Ref S3BucketName
+            - Name: S3_PREFIX
+              Value: !Ref S3Prefix
+            - Name: SYNC_INTERVAL
+              Value: !Ref SyncInterval
+            - Name: AWS_DEFAULT_REGION
+              Value: us-east-1
+          Command:
+            - !Sub "while true; do aws s3 sync s3://${S3BucketName}/${S3Prefix} /etc/envoy/dynamic --delete; sleep ${SyncInterval}; done"
+          MountPoints:
+            - SourceVolume: dynamic-config
+              ContainerPath: /etc/envoy/dynamic
+              ReadOnly: false
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/envoy
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: s3-sync
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: envoy-dynamic-s3-service
+      Cluster: !Ref ClusterArn
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+          Subnets: !Ref SubnetIds
+          SecurityGroups: !Ref SecurityGroupIds
+
+Outputs:
+  ServiceName:
+    Value: !Ref Service
