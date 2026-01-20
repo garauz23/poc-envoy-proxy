@@ -1,44 +1,44 @@
-# Envoy ECR build/push
+# Compilar y publicar Envoy en ECR
 
-This folder contains the minimal files needed to build the Envoy image that reads
-its dynamic resources from `/etc/envoy/dynamic` at runtime.
+Esta carpeta contiene los archivos mínimos necesarios para construir la imagen de Envoy que lee
+sus recursos dinámicos desde `/etc/envoy/dynamic` en tiempo de ejecución.
 
-## Build and push
+## Compilar y publicar
 
 ```bash
 aws ecr get-login-password --region us-east-1 | \
   docker login --username AWS --password-stdin 758208602079.dkr.ecr.us-east-1.amazonaws.com
 
-# Build for ECS/Fargate (linux/amd64)
+# Compilar para ECS/Fargate (linux/amd64)
 docker buildx build --platform linux/amd64 -t envoy:latest -f Dockerfile . --load
 docker tag envoy:latest 758208602079.dkr.ecr.us-east-1.amazonaws.com/envoy:latest
 docker push 758208602079.dkr.ecr.us-east-1.amazonaws.com/envoy:latest
 ```
 
-If the repo does not exist yet:
+Si el repositorio aún no existe:
 
 ```bash
 aws ecr create-repository --repository-name envoy --region us-east-1
 ```
 
-## S3 bucket and sync
+## Bucket S3 y sincronización
 
-Create the bucket and sync your dynamic config files:
+Crea el bucket y sincroniza tus archivos de configuración dinámica:
 
 ```bash
 aws s3 mb s3://envoy-file-config --region us-east-1
 aws s3 sync ../ s3://envoy-file-config/ --exclude "*" --include "lds.yaml" --include "cds.yaml" --include "eds.yaml" --include "rds.yaml"
 ```
 
-## CloudFormation overview
+## Resumen de CloudFormation
 
 `cloudformation.yaml` despliega un servicio ECS Fargate con dos contenedores:
 - `envoy` (usa la imagen de ECR) y espera a que existan `cds.yaml`/`lds.yaml`.
 - `s3-sync` (aws-cli) sincroniza continuamente la config desde S3 al volumen compartido.
 
-Tambien crea:
+También crea:
 - log group en CloudWatch (`/ecs/envoy`)
-- roles IAM para ejecucion y tarea (con permiso de lectura a S3)
+- roles IAM para ejecución y tarea (con permiso de lectura a S3)
 
 El bucket S3 se crea por separado en `bucket.yaml`.
 

@@ -1,16 +1,16 @@
-🚀 Envoy Real Prototype
+🚀 Prototipo real de Envoy
 
-Local Microservices Mesh using Docker Compose
+Malla local de microservicios usando Docker Compose
 
-API → Service1 → Envoy Proxy → Service2
+API → Service1 → Proxy Envoy → Service2
 
 ⸻
 
-📘 Overview
+📘 Descripción general
 
-This project is a local microservice mesh prototype using Envoy Proxy to route traffic between two independent services:
-	•	Service1 → Express API calling Envoy
-	•	Envoy → Reverse proxy forwarding requests to Service2
-	•	Service2 → Simple backend API
+Este proyecto es un prototipo local de malla de microservicios que usa Envoy Proxy para enrutar el tráfico entre dos servicios independientes:
+	•	Service1 → API Express que llama a Envoy
+	•	Envoy → Proxy inverso que reenvía solicitudes a Service2
+	•	Service2 → API backend simple
 
-This setup simulates a service mesh pattern, commonly used in ECS, Kubernetes, and service-to-service architectures.
+Esta configuración simula un patrón de service mesh, usado comúnmente en ECS, Kubernetes y arquitecturas de servicio a servicio.
