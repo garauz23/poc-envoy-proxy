@@ -1,12 +1,32 @@
 version_info: "0"
 resources:
-- "@type": type.googleapis.com/envoy.config.route.v3.RouteConfiguration
-  name: route_config_1
-  virtual_hosts:
-  - name: vh
-    domains: ["*"]
-    routes:
-    - match:
-        prefix: "/headers"
-      route:
-        cluster: instance_1
+  - "@type": type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+    name: route_config_1
+    virtual_hosts:
+      - name: vh
+        domains: ["*"]
+        routes:
+          - match:
+              prefix: "/headers"
+            route:
+              cluster: instance_1
+          - match:
+              prefix: "/AutenticarUsuarioV2"
+            route:
+              cluster: authentication
+          - match:
+              prefix: "/ConsultarConsolidadoCuentasAfiliadas"
+            route:
+              cluster: accounts
+          - match:
+              prefix: "/EjecutarTransaccionCanales"
+            route:
+              cluster: transactional
+          - match:
+              prefix: "/ConsultarModeloSeguridadPorTransaccion"
+            route:
+              cluster: transactional
+          - match:
+              prefix: "/"
+            route:
+              cluster: allllendpoints
