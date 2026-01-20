@@ -83,23 +83,27 @@ Opción simple: Lua filter (muy usado para esto)
 En tu http_connection_manager, agrega el filtro Lua antes del router:
 
 ```bash
-outlier_detection:
-  interval: 10s
-  base_ejection_time: 30s
-  max_ejection_time: 300s
-  max_ejection_percent: 20
+http_filters:
+- name: envoy.filters.http.lua
+  typed_config:
+    "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+    inline_code: |
+      function envoy_on_response(handle)
+        local status = handle:headers():get(":status")
 
-  # 5xx del upstream
-  consecutive_5xx: 5
-  enforcing_consecutive_5xx: 100
+        -- Solo tocar respuestas que vienen del upstream (evita cambiar 403 de auth local, etc.)
+        local upstream_time = handle:headers():get("x-envoy-upstream-service-time")
+        if upstream_time == nil then
+          return
+        end
 
-  # ✅ timeouts/resets/etc (lo que típicamente “equivale” a 408)
-  consecutive_gateway_failure: 5
-  enforcing_consecutive_gateway_failure: 100
-
-  # opcional (errores originados localmente)
-  consecutive_local_origin_failure: 5
-  enforcing_consecutive_local_origin_failure: 100
-
-  split_external_local_origin_errors: true
+        -- Mapear 403/408 -> 503 (para que outlier lo trate como falla)
+        if status == "403" or status == "408" then
+          handle:headers():replace(":status", "503")
+          handle:headers():add("x-outlier-mapped-from", status)
+        end
+      end
+- name: envoy.filters.http.router
+  typed_config:
+    "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 ```
