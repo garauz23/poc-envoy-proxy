@@ -33,13 +33,73 @@ aws s3 sync ../ s3://envoy-file-config/ --exclude "*" --include "lds.yaml" --inc
 ## Resumen de CloudFormation
 
 `cloudformation.yaml` despliega un servicio ECS Fargate con dos contenedores:
+
 - `envoy` (usa la imagen de ECR) y espera a que existan `cds.yaml`/`lds.yaml`.
 - `s3-sync` (aws-cli) sincroniza continuamente la config desde S3 al volumen compartido.
 
 También crea:
+
 - log group en CloudWatch (`/ecs/envoy`)
 - roles IAM para ejecución y tarea (con permiso de lectura a S3)
 
 El bucket S3 se crea por separado en `bucket.yaml`.
 
 ![Envoy dynamic config diagram](diagram.png)
+
+## Outlier detection
+
+### Outlier que cubre 5xx + timeouts (recomendado para “408”)
+
+```bash
+outlier_detection:
+  interval: 10s
+  base_ejection_time: 30s
+  max_ejection_time: 300s
+  max_ejection_percent: 20
+
+  # 5xx del upstream
+  consecutive_5xx: 5
+  enforcing_consecutive_5xx: 100
+
+  # ✅ timeouts/resets/etc (lo que típicamente “equivale” a 408)
+  consecutive_gateway_failure: 5
+  enforcing_consecutive_gateway_failure: 100
+
+  # opcional (errores originados localmente)
+  consecutive_local_origin_failure: 5
+  enforcing_consecutive_local_origin_failure: 100
+
+  split_external_local_origin_errors: true
+```
+
+### Para “incluir 403 y 408” de verdad: mapearlos a 503 (solo cuando convenga)
+
+Si en tu sistema 403 y 408 significan “esta instancia está rota/mal configurada”, entonces conviértelos a 503 para que:
+• el router lo vea como 5xx
+• el outlier lo cuente y expulse ese host
+
+Opción simple: Lua filter (muy usado para esto)
+
+En tu http_connection_manager, agrega el filtro Lua antes del router:
+
+```bash
+outlier_detection:
+  interval: 10s
+  base_ejection_time: 30s
+  max_ejection_time: 300s
+  max_ejection_percent: 20
+
+  # 5xx del upstream
+  consecutive_5xx: 5
+  enforcing_consecutive_5xx: 100
+
+  # ✅ timeouts/resets/etc (lo que típicamente “equivale” a 408)
+  consecutive_gateway_failure: 5
+  enforcing_consecutive_gateway_failure: 100
+
+  # opcional (errores originados localmente)
+  consecutive_local_origin_failure: 5
+  enforcing_consecutive_local_origin_failure: 100
+
+  split_external_local_origin_errors: true
+```
