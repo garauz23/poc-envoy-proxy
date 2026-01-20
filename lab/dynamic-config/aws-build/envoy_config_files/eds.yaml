@@ -18,11 +18,6 @@ resources:
                 socket_address:
                   address: 127.0.0.1
                   port_value: 4040
-          - endpoint:
-              address:
-                socket_address:
-                  address: 127.0.0.1
-                  port_value: 5050
   - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
     cluster_name: accounts
     endpoints:
@@ -32,11 +27,6 @@ resources:
                 socket_address:
                   address: 127.0.0.1
                   port_value: 4040
-          - endpoint:
-              address:
-                socket_address:
-                  address: 127.0.0.1
-                  port_value: 5050
   - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
     cluster_name: fullendpoints
     endpoints:
@@ -46,11 +36,6 @@ resources:
                 socket_address:
                   address: 127.0.0.1
                   port_value: 4040
-          - endpoint:
-              address:
-                socket_address:
-                  address: 127.0.0.1
-                  port_value: 5050
   - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
     cluster_name: transactional
     endpoints:
@@ -60,8 +45,3 @@ resources:
                 socket_address:
                   address: 127.0.0.1
                   port_value: 4040
-          - endpoint:
-              address:
-                socket_address:
-                  address: 127.0.0.1
-                  port_value: 5050
