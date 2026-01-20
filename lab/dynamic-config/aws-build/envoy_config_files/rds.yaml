@@ -11,22 +11,30 @@ resources:
             route:
               cluster: instance_1
           - match:
-              prefix: "/AutenticarUsuarioV2"
+              safe_regex:
+                google_re2: {}
+                regex: ".*/AutenticarUsuarioV2$"
             route:
               cluster: authentication
           - match:
-              prefix: "/ConsultarConsolidadoCuentasAfiliadas"
+              safe_regex:
+                google_re2: {}
+                regex: ".*/ConsultarConsolidadoCuentasAfiliadas$"
             route:
               cluster: accounts
           - match:
-              prefix: "/EjecutarTransaccionCanales"
+              safe_regex:
+                google_re2: {}
+                regex: ".*/EjecutarTransaccionCanales$"
             route:
               cluster: transactional
           - match:
-              prefix: "/ConsultarModeloSeguridadPorTransaccion"
+              safe_regex:
+                google_re2: {}
+                regex: ".*/ConsultarModeloSeguridadPorTransaccion$"
             route:
               cluster: transactional
           - match:
               prefix: "/"
             route:
-              cluster: allllendpoints
+              cluster: allendpoints

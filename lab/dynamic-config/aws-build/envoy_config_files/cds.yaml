@@ -53,7 +53,7 @@ resources:
       failure_percentage_request_volume: 10
       failure_percentage_minimum_hosts: 2
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
-    name: fullendpoints
+    name: allendpoints
     connect_timeout: 5s
     type: EDS
     eds_cluster_config:

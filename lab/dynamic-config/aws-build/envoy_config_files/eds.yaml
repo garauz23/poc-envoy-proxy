@@ -28,7 +28,7 @@ resources:
                   address: 127.0.0.1
                   port_value: 4040
   - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
-    cluster_name: fullendpoints
+    cluster_name: allendpoints
     endpoints:
       - lb_endpoints:
           - endpoint:
