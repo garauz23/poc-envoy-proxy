@@ -3,9 +3,11 @@ node:
   id: envoy-instance-1
 dynamic_resources:
   lds_config:
-    path: /etc/envoy/dynamic/lds.yaml
+    path_config_source:
+      path: envoy_config_files/lds.yaml
   cds_config:
-    path: /etc/envoy/dynamic/cds.yaml
+    path_config_source:
+      path: envoy_config_files/cds.yaml
 admin:
   address:
     socket_address:

@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploy Envoy on EC2 with an S3FS-mounted dynamic config directory.
+
+Parameters:
+  EnvoyImage:
+    Type: String
+    Default: 758208602079.dkr.ecr.us-east-1.amazonaws.com/envoy:latest
+  EcrRegion:
+    Type: String
+    Default: us-east-1
+  S3BucketName:
+    Type: String
+    Default: envoy-file-config
+  S3Prefix:
+    Type: String
+    Default: ""
+  InstanceType:
+    Type: String
+    Default: t3.micro
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+
+Resources:
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Policies:
+        - PolicyName: S3ReadConfig
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}"
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  EnvoyInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}"
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          yum update -y
+          amazon-linux-extras install docker -y
+          systemctl enable docker
+          systemctl start docker
+
+          amazon-linux-extras install epel -y
+          yum install -y s3fs-fuse awscli
+
+          mkdir -p /etc/envoy/dynamic
+          if ! grep -q "^user_allow_other" /etc/fuse.conf; then
+            echo "user_allow_other" >> /etc/fuse.conf
+          fi
+
+          S3_MOUNT="${S3BucketName}"
+          if [ -n "${S3Prefix}" ]; then
+            S3_MOUNT="${S3BucketName}:${S3Prefix}"
+          fi
+
+          s3fs "${S3_MOUNT}" /etc/envoy/dynamic \
+            -o iam_role=auto \
+            -o allow_other \
+            -o use_cache=/tmp \
+            -o endpoint=${AWS::Region}
+
+          if ! grep -q "/etc/envoy/dynamic" /etc/fstab; then
+            echo "${S3_MOUNT} /etc/envoy/dynamic fuse.s3fs _netdev,iam_role=auto,allow_other,use_cache=/tmp,endpoint=${AWS::Region} 0 0" >> /etc/fstab
+          fi
+
+          ENVOY_IMAGE="${EnvoyImage}"
+          if echo "${EnvoyImage}" | grep -q "\.dkr\.ecr\."; then
+            ECR_REGISTRY="$(echo "${EnvoyImage}" | cut -d/ -f1)"
+            aws ecr get-login-password --region "${EcrRegion}" | \
+              docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+          fi
+
+          docker run --restart unless-stopped -d \
+            --name envoy \
+            -p 10000:10000 \
+            -p 9901:9901 \
+            -v /etc/envoy/dynamic:/etc/envoy/dynamic:ro \
+            "${EnvoyImage}" \
+            /bin/sh -c "until [ -f /etc/envoy/dynamic/cds.yaml ] && [ -f /etc/envoy/dynamic/lds.yaml ]; do echo \"waiting for dynamic config\"; sleep 2; done; exec /usr/local/bin/envoy -c /etc/envoy/envoy.yaml --log-level info"
+
+Outputs:
+  InstanceId:
+    Value: !Ref EnvoyInstance

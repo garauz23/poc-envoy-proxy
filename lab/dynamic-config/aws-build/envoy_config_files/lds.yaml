@@ -1,7 +1,7 @@
 version_info: "0"
 resources:
   - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
-    name: listener_0
+    name: rest_listener
     address:
       socket_address:
         address: 0.0.0.0
@@ -17,6 +17,28 @@ resources:
                   typed_config:
                     "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
               rds:
-                route_config_name: route_config_1
+                route_config_name: route_config_rest
                 config_source:
-                  path: ./rds.yaml
+                  path_config_source:
+                    path: envoy_config_files/rds/rest.yaml
+  - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
+    name: soap_listener
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 20000
+    filter_chains:
+      - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: listener_http
+              http_filters:
+                - name: envoy.filters.http.router
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+              rds:
+                route_config_name: route_config_soap
+                config_source:
+                  path_config_source:
+                    path: envoy_config_files/rds/soap.yaml

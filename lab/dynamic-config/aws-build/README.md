@@ -46,6 +46,16 @@ El bucket S3 se crea por separado en `bucket.yaml`.
 
 ![Envoy dynamic config diagram](diagram.png)
 
+## Plantilla EC2 con S3FS (montaje real de S3)
+
+Si necesitas un "mount point" S3 real, Fargate no soporta FUSE. Usa la nueva plantilla
+`cloudformation-s3fs-ec2.yaml`, que levanta una instancia EC2, monta el bucket con S3FS
+y ejecuta Envoy en Docker leyendo desde `/etc/envoy/dynamic`.
+
+Notas:
+- Requiere una capacidad ECS EC2 o una instancia EC2 dedicada (esta plantilla usa EC2 directo).
+- S3FS tiene mayor latencia que la sincronizacion; no es adecuado para cambios muy frecuentes.
+
 ## Outlier detection
 
 ### Outlier que cubre 5xx + timeouts (recomendado para “408”)

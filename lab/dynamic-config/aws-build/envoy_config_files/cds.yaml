@@ -1,76 +1,50 @@
 version_info: "0"
 resources:
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
-    name: instance_1
+    name: authentication_rest
     connect_timeout: 5s
     type: EDS
     eds_cluster_config:
       eds_config:
-        path: ./eds.yaml
-    outlier_detection:
-      interval: 5s # cada 5 segundos Envoy evalua el estado de los hosts
-      base_ejection_time: 10s # Tiempo minimo que un host sera expulsado
-      max_ejection_percent: 100 # Porcentaje maximo que el host puede expulsar al mismo tiempo
-      enforcing_failure_percentage: 100 # Indica que tan estrictamente Envoy aplica la politica de failure percentage outlier detection Valores de 0 - 100 (0 no expulsa, 1-99 aplica la politica a un % de los casos, 100 siempre expulsa)
-      failure_percentage_threshold: 10 # % de errores que hace que un host sea candidato a expulsión
-      failure_percentage_request_volume: 10 # Cantidad minima de request para evaluar el porcentaje
-      failure_percentage_minimum_hosts: 2 # numero de host necesarios para activar la logica
-    circuit_breakers:
-      thresholds:
-        - priority: DEFAULT
-          max_connections: 2
-          max_pending_requests: 3
-          max_requests: 1
-          max_retries: 1
+        path_config_source:
+          path: envoy_config_files/eds/authentication-rest.yaml
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
-    name: authentication
+    name: transactional_rest
     connect_timeout: 5s
     type: EDS
     eds_cluster_config:
       eds_config:
-        path: ./eds.yaml
-    outlier_detection:
-      interval: 5s
-      base_ejection_time: 10s
-      max_ejection_percent: 100
-      enforcing_failure_percentage: 100
-      failure_percentage_threshold: 10
-      failure_percentage_request_volume: 10
-      failure_percentage_minimum_hosts: 2
+        path_config_source:
+          path: envoy_config_files/eds/transactional-rest.yaml
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
-    name: accounts
+    name: allendpoints_rest
     connect_timeout: 5s
     type: EDS
     eds_cluster_config:
       eds_config:
-        path: ./eds.yaml
-    outlier_detection:
-      interval: 5s
-      base_ejection_time: 10s
-      max_ejection_percent: 100
-      enforcing_failure_percentage: 100
-      failure_percentage_threshold: 10
-      failure_percentage_request_volume: 10
-      failure_percentage_minimum_hosts: 2
+        path_config_source:
+          path: envoy_config_files/eds/allendpoints-rest.yaml
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
-    name: allendpoints
+    name: authentication_soap
     connect_timeout: 5s
     type: EDS
     eds_cluster_config:
       eds_config:
-        path: ./eds.yaml
+        path_config_source:
+          path: envoy_config_files/eds/authentication-soap.yaml
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
-    name: transactional
+    name: transactional_soap
     connect_timeout: 5s
     type: EDS
     eds_cluster_config:
       eds_config:
-        path: ./eds.yaml
-    outlier_detection:
-      interval: 5s
-      base_ejection_time: 10s
-      max_ejection_percent: 100
-      enforcing_failure_percentage: 100
-      failure_percentage_threshold: 10
-      failure_percentage_request_volume: 10
-      failure_percentage_minimum_hosts: 2
+        path_config_source:
+          path: envoy_config_files/eds/transactional-soap.yaml
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: allendpoints_soap
+    connect_timeout: 5s
+    type: EDS
+    eds_cluster_config:
+      eds_config:
+        path_config_source:
+          path: envoy_config_files/eds/allendpoints-soap.yaml
