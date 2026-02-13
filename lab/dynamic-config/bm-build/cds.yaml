@@ -1,0 +1,110 @@
+version_info: "0"
+resources:
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: authentication_rest
+    connect_timeout: 5s
+    type: LOGICAL_DNS
+    dns_lookup_family: V4_ONLY
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+    load_assignment:
+      cluster_name: authentication_rest
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: dtpcanales-virginia.stage-digital.com
+                    port_value: 8450
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: transactional_rest
+    connect_timeout: 5s
+    type: LOGICAL_DNS
+    dns_lookup_family: V4_ONLY
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+    load_assignment:
+      cluster_name: transactional_rest
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: dtpcanales-virginia.stage-digital.com
+                    port_value: 8450
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: allendpoints_rest
+    connect_timeout: 5s
+    type: LOGICAL_DNS
+    dns_lookup_family: V4_ONLY
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+    load_assignment:
+      cluster_name: allendpoints_rest
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: dtpcanales-virginia.stage-digital.com
+                    port_value: 8450
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: authentication_soap
+    connect_timeout: 5s
+    type: LOGICAL_DNS
+    dns_lookup_family: V4_ONLY
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+    load_assignment:
+      cluster_name: authentication_soap
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: dtpcanales-virginia.stage-digital.com
+                    port_value: 8443
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: transactional_soap
+    connect_timeout: 5s
+    type: LOGICAL_DNS
+    dns_lookup_family: V4_ONLY
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+    load_assignment:
+      cluster_name: transactional_soap
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: dtpcanales-virginia.stage-digital.com
+                    port_value: 8443
+  - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+    name: allendpoints_soap
+    connect_timeout: 5s
+    type: LOGICAL_DNS
+    dns_lookup_family: V4_ONLY
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+    load_assignment:
+      cluster_name: allendpoints_soap
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: dtpcanales-virginia.stage-digital.com
+                    port_value: 8443
