@@ -8,25 +8,21 @@ resources:
         routes:
           - match:
               safe_regex:
-                google_re2: {}
                 regex: ".*/AutenticarUsuarioV2$"
             route:
               cluster: authentication_rest
           - match:
               safe_regex:
-                google_re2: {}
                 regex: ".*/ConsultarConsolidadoCuentasAfiliadas$"
             route:
               cluster: authentication_rest
           - match:
               safe_regex:
-                google_re2: {}
                 regex: ".*/EjecutarTransaccionCanales$"
             route:
               cluster: transactional_rest
           - match:
               safe_regex:
-                google_re2: {}
                 regex: ".*/ConsultarModeloSeguridadPorTransaccion$"
             route:
               cluster: transactional_rest

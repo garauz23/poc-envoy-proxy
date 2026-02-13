@@ -1,0 +1,35 @@
+services:
+  https-8450:
+    build:
+      context: ./https-service
+    container_name: bm-https-8450
+    environment:
+      - PORT=8450
+      - SERVICE_NAME=backend-8450
+    ports:
+      - "8450:8450"
+
+  https-8443:
+    build:
+      context: ./https-service
+    container_name: bm-https-8443
+    environment:
+      - PORT=8443
+      - SERVICE_NAME=backend-8443
+    ports:
+      - "8443:8443"
+
+  client-backend:
+    build:
+      context: ./client-backend
+    container_name: bm-client-backend
+    environment:
+      - PORT=5050
+      - ENVOY_HOST=host.docker.internal
+      - ENVOY_REST_PORT=10000
+      - ENVOY_SOAP_PORT=20000
+      - ALLOW_INSECURE_TLS=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "5050:5050"

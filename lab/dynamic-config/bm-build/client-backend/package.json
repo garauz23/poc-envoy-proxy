@@ -1,0 +1,10 @@
+{
+  "name": "client-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Node.js backend that forwards traffic to Envoy HTTPS listeners",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

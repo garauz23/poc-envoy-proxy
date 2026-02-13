@@ -16,7 +16,7 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: dtpcanales-virginia.stage-digital.com
+                    address: 0.0.0.0
                     port_value: 8450
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: transactional_rest
@@ -34,7 +34,7 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: dtpcanales-virginia.stage-digital.com
+                    address: 0.0.0.0
                     port_value: 8450
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: allendpoints_rest
@@ -52,7 +52,7 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: dtpcanales-virginia.stage-digital.com
+                    address: 0.0.0.0
                     port_value: 8450
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: authentication_soap
@@ -70,7 +70,7 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: dtpcanales-virginia.stage-digital.com
+                    address: 0.0.0.0
                     port_value: 8443
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: transactional_soap
@@ -88,7 +88,7 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: dtpcanales-virginia.stage-digital.com
+                    address: 0.0.0.0
                     port_value: 8443
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: allendpoints_soap
@@ -106,5 +106,5 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: dtpcanales-virginia.stage-digital.com
+                    address: 0.0.0.0
                     port_value: 8443

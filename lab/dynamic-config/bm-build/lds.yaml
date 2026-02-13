@@ -2,6 +2,7 @@ version_info: "0"
 resources:
   - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
     name: listener_rest
+    enable_reuse_port: false
     address:
       socket_address:
         address: 0.0.0.0
@@ -26,9 +27,21 @@ resources:
               rds:
                 route_config_name: route_config_rest
                 config_source:
-                  path: ./rds/rest.yaml
+                  path_config_source:
+                    path: ./rds/rest.yaml
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+            common_tls_context:
+              tls_certificates:
+                - certificate_chain:
+                    filename: ./certs/envoy.crt
+                  private_key:
+                    filename: ./certs/envoy.key
   - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
     name: listener_soap
+    enable_reuse_port: false
     address:
       socket_address:
         address: 0.0.0.0
@@ -53,4 +66,15 @@ resources:
               rds:
                 route_config_name: route_config_soap
                 config_source:
-                  path: ./rds/soap.yaml
+                  path_config_source:
+                    path: ./rds/soap.yaml
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+            common_tls_context:
+              tls_certificates:
+                - certificate_chain:
+                    filename: ./certs/envoy.crt
+                  private_key:
+                    filename: ./certs/envoy.key

@@ -1,11 +1,20 @@
 node:
   cluster: cluster-1
   id: envoy-instance-1
+overload_manager:
+  refresh_interval: 0.25s
+  resource_monitors:
+    - name: envoy.resource_monitors.global_downstream_max_connections
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+        max_active_downstream_connections: 10000
 dynamic_resources:
   lds_config:
-    path: /etc/envoy/dynamic/lds.yaml
+    path_config_source:
+      path: lds.yaml
   cds_config:
-    path: /etc/envoy/dynamic/cds.yaml
+    path_config_source:
+      path: cds.yaml
 admin:
   address:
     socket_address:
