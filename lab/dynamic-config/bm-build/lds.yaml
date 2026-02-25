@@ -5,8 +5,8 @@ resources:
     enable_reuse_port: false
     address:
       socket_address:
-        address: 0.0.0.0
-        port_value: 10000
+        address: ${LISTENER_REST_ADDRESS}
+        port_value: ${LISTENER_REST_PORT}
     filter_chains:
       - filters:
           - name: envoy.filters.network.http_connection_manager
@@ -19,7 +19,7 @@ resources:
                     "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                     log_format:
                       text_format_source:
-                        inline_string: "[%START_TIME%] %REQ(:METHOD)% %REQ(:PATH)% -> %RESPONSE_CODE% upstream=%UPSTREAM_HOST% time=%DURATION%ms req_id=%REQ(X-REQUEST-ID)%\n" 
+                        inline_string: "[%START_TIME%] %REQ(:METHOD)% %REQ(:PATH)% host=%REQ(:AUTHORITY)% ua=%REQ(USER-AGENT)% xff=%REQ(X-FORWARDED-FOR)% corr=%REQ(X-CORRELATION-ID)% cluster=%UPSTREAM_CLUSTER% upstream=%UPSTREAM_HOST% -> %RESPONSE_CODE% time=%DURATION%ms req_id=%REQ(X-REQUEST-ID)%\n"
               http_filters:
                 - name: envoy.filters.http.router
                   typed_config:
@@ -44,8 +44,8 @@ resources:
     enable_reuse_port: false
     address:
       socket_address:
-        address: 0.0.0.0
-        port_value: 20000
+        address: ${LISTENER_SOAP_ADDRESS}
+        port_value: ${LISTENER_SOAP_PORT}
     filter_chains:
       - filters:
           - name: envoy.filters.network.http_connection_manager
@@ -58,7 +58,7 @@ resources:
                     "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                     log_format:
                       text_format_source:
-                        inline_string: "[%START_TIME%] %REQ(:METHOD)% %REQ(:PATH)% -> %RESPONSE_CODE% upstream=%UPSTREAM_HOST% time=%DURATION%ms req_id=%REQ(X-REQUEST-ID)%\n" 
+                        inline_string: "[%START_TIME%] %REQ(:METHOD)% %REQ(:PATH)% host=%REQ(:AUTHORITY)% ua=%REQ(USER-AGENT)% xff=%REQ(X-FORWARDED-FOR)% corr=%REQ(X-CORRELATION-ID)% cluster=%UPSTREAM_CLUSTER% upstream=%UPSTREAM_HOST% -> %RESPONSE_CODE% time=%DURATION%ms req_id=%REQ(X-REQUEST-ID)%\n"
               http_filters:
                 - name: envoy.filters.http.router
                   typed_config:

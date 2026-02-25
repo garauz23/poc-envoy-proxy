@@ -19,7 +19,7 @@ resources:
                 address:
                   socket_address:
                     address: 127.0.0.1
-                    port_value: 4040
+                    port_value: 4041
             - endpoint:
                 address:
                   socket_address:

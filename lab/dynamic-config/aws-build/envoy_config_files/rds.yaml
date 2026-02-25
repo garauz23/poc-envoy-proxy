@@ -12,25 +12,21 @@ resources:
               cluster: instance_1
           - match:
               safe_regex:
-                google_re2: {}
                 regex: ".*/AutenticarUsuarioV2$"
             route:
               cluster: authentication
           - match:
               safe_regex:
-                google_re2: {}
                 regex: ".*/ConsultarConsolidadoCuentasAfiliadas$"
             route:
               cluster: authentication
           - match:
               safe_regex:
-                google_re2: {}
                 regex: ".*/EjecutarTransaccionCanales$"
             route:
               cluster: transactional
           - match:
               safe_regex:
-                google_re2: {}
                 regex: ".*/ConsultarModeloSeguridadPorTransaccion$"
             route:
               cluster: transactional

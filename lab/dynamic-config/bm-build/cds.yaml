@@ -16,8 +16,8 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 0.0.0.0
-                    port_value: 8450
+                    address: ${AUTHENTICATION_REST_ADDRESS}
+                    port_value: ${AUTHENTICATION_REST_PORT}
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: transactional_rest
     connect_timeout: 5s
@@ -34,8 +34,8 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 0.0.0.0
-                    port_value: 8450
+                    address: ${TRANSACTIONAL_REST_ADDRESS}
+                    port_value: ${TRANSACTIONAL_REST_PORT}
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: allendpoints_rest
     connect_timeout: 5s
@@ -52,8 +52,8 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 0.0.0.0
-                    port_value: 8450
+                    address: ${ALLENDPOINTS_REST_ADDRESS}
+                    port_value: ${ALLENDPOINTS_REST_PORT}
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: authentication_soap
     connect_timeout: 5s
@@ -70,8 +70,8 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 0.0.0.0
-                    port_value: 8443
+                    address: ${AUTHENTICATION_SOAP_ADDRESS}
+                    port_value: ${AUTHENTICATION_SOAP_PORT}
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: transactional_soap
     connect_timeout: 5s
@@ -88,8 +88,8 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 0.0.0.0
-                    port_value: 8443
+                    address: ${TRANSACTIONAL_SOAP_ADDRESS}
+                    port_value: ${TRANSACTIONAL_SOAP_PORT}
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: allendpoints_soap
     connect_timeout: 5s
@@ -106,5 +106,5 @@ resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 0.0.0.0
-                    port_value: 8443
+                    address: ${ALLENDPOINTS_SOAP_ADDRESS}
+                    port_value: ${ALLENDPOINTS_SOAP_PORT}

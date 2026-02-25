@@ -11,10 +11,10 @@ overload_manager:
 dynamic_resources:
   lds_config:
     path_config_source:
-      path: lds.yaml
+      path: ./.rendered/lds.yaml
   cds_config:
     path_config_source:
-      path: cds.yaml
+      path: ./.rendered/cds.yaml
 admin:
   address:
     socket_address:
