@@ -7,23 +7,39 @@ resources:
         domains: ["*"]
         routes:
           - match:
-              safe_regex:
-                regex: ".*/AutenticarUsuarioV2$"
+              prefix: "/"
+              headers:
+                - name: SOAPAction
+                  string_match:
+                    safe_regex:
+                      regex: ".*AutenticarUsuarioV2.*"
             route:
               cluster: authentication_soap
           - match:
-              safe_regex:
-                regex: ".*/ConsultarConsolidadoCuentasAfiliadas$"
+              prefix: "/"
+              headers:
+                - name: SOAPAction
+                  string_match:
+                    safe_regex:
+                      regex: ".*ConsultarConsolidadoCuentasAfiliadas.*"
             route:
               cluster: authentication_soap
           - match:
-              safe_regex:
-                regex: ".*/EjecutarTransaccionCanales$"
+              prefix: "/"
+              headers:
+                - name: SOAPAction
+                  string_match:
+                    safe_regex:
+                      regex: ".*EjecutarTransaccionCanales.*"
             route:
               cluster: transactional_soap
           - match:
-              safe_regex:
-                regex: ".*/ConsultarModeloSeguridadPorTransaccion$"
+              prefix: "/"
+              headers:
+                - name: SOAPAction
+                  string_match:
+                    safe_regex:
+                      regex: ".*ConsultarModeloSeguridadPorTransaccion.*"
             route:
               cluster: transactional_soap
           - match:
