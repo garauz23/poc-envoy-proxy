@@ -4,7 +4,7 @@ const https = require('https');
 const port = Number(process.env.PORT || 5050);
 const envoyHost = process.env.ENVOY_HOST || 'localhost';
 const restPort = Number(process.env.ENVOY_REST_PORT || 10000);
-const soapPort = Number(process.env.ENVOY_SOAP_PORT || 20000);
+const soapPort = Number(process.env.ENVOY_SOAP_PORT || restPort);
 const allowInsecureTls = (process.env.ALLOW_INSECURE_TLS || 'true').toLowerCase() === 'true';
 
 function readBody(req) {

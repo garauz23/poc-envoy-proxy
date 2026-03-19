@@ -9,11 +9,38 @@ const options = {
   cert: fs.readFileSync("/app/certs/server.crt"),
 };
 
-const server = https.createServer(options, (req, res) => {
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
+
+const server = https.createServer(options, async (req, res) => {
+  const requestUrl = new URL(req.url || "/", "https://localhost");
+
+  if (req.method === "POST" && requestUrl.pathname === "/calls/users") {
+    const body = await readBody(req);
+
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        service: name,
+        method: req.method,
+        path: requestUrl.pathname,
+        message: `Hello world from ${name}`,
+        body,
+      })
+    );
+    return;
+  }
+
   const payload = {
     service: name,
     method: req.method,
-    path: req.url,
+    path: requestUrl.pathname,
     message: "HTTPS backend is running",
   };
 

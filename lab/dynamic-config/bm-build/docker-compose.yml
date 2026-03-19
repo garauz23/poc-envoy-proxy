@@ -27,7 +27,7 @@ services:
       - PORT=5050
       - ENVOY_HOST=host.docker.internal
       - ENVOY_REST_PORT=10000
-      - ENVOY_SOAP_PORT=20000
+      - ENVOY_SOAP_PORT=10000
       - ALLOW_INSECURE_TLS=true
     extra_hosts:
       - "host.docker.internal:host-gateway"

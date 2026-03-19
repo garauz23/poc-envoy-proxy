@@ -1,0 +1,98 @@
+version_info: "0"
+resources:
+  - "@type": type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+    name: route_config_api
+    virtual_hosts:
+      - name: vh
+        domains: ["*"]
+        routes:
+          - match:
+              safe_regex:
+                regex: "^/rest(?:/.*)?/AutenticarUsuarioV2$"
+            route:
+              cluster: authentication_rest
+              regex_rewrite:
+                pattern:
+                  regex: "^/rest(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/rest(?:/.*)?/ConsultarConsolidadoCuentasAfiliadas$"
+            route:
+              cluster: authentication_rest
+              regex_rewrite:
+                pattern:
+                  regex: "^/rest(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/rest(?:/.*)?/EjecutarTransaccionCanales$"
+            route:
+              cluster: transactional_rest
+              regex_rewrite:
+                pattern:
+                  regex: "^/rest(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/rest(?:/.*)?/ConsultarModeloSeguridadPorTransaccion$"
+            route:
+              cluster: transactional_rest
+              regex_rewrite:
+                pattern:
+                  regex: "^/rest(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/soap(?:/.*)?/AutenticarUsuarioV2$"
+            route:
+              cluster: authentication_soap
+              regex_rewrite:
+                pattern:
+                  regex: "^/soap(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/soap(?:/.*)?/ConsultarConsolidadoCuentasAfiliadas$"
+            route:
+              cluster: authentication_soap
+              regex_rewrite:
+                pattern:
+                  regex: "^/soap(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/soap(?:/.*)?/EjecutarTransaccionCanales$"
+            route:
+              cluster: transactional_soap
+              regex_rewrite:
+                pattern:
+                  regex: "^/soap(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/soap(?:/.*)?/ConsultarModeloSeguridadPorTransaccion$"
+            route:
+              cluster: transactional_soap
+              regex_rewrite:
+                pattern:
+                  regex: "^/soap(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/rest(?:/.*)?$"
+            route:
+              cluster: allendpoints_rest
+              regex_rewrite:
+                pattern:
+                  regex: "^/rest(?:/(.*))?$"
+                substitution: "/\\1"
+          - match:
+              safe_regex:
+                regex: "^/soap(?:/.*)?$"
+            route:
+              cluster: allendpoints_soap
+              regex_rewrite:
+                pattern:
+                  regex: "^/soap(?:/(.*))?$"
+                substitution: "/\\1"
