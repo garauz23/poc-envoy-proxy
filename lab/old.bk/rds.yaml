@@ -1,0 +1,110 @@
+version_info: "1"
+resources:
+  - "@type": type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+    name: route_config
+    virtual_hosts:
+    - name: vh
+      domains: ["*"]
+      routes:
+#--------------------------------- SOAP ---------------------------------
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            string_match:
+              safe_regex:
+                regex: ".*ConsultarConsolidadoCuentasAfiliadas.*"
+        route:
+          cluster: authentication_soap
+          timeout: 60s
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            string_match:
+              safe_regex:
+                regex: ".*ValidarUsuarioCobis.*"
+        route:
+          cluster: authentication_soap
+          timeout: 60s
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            string_match:
+              safe_regex:
+                regex: ".*CrearMaquinaUsuario.*"
+        route:
+          cluster: authentication_soap
+          timeout: 60s
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            string_match:
+              safe_regex:
+                regex: ".*EjecutarTransaccionCanales.*"
+        route:
+          cluster: transactional_soap
+          timeout: 60s
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            string_match:
+              safe_regex:
+                regex: ".*EjecutarModeloSeguridadPorTransaccion.*"
+        route:
+          cluster: transactional_soap
+          timeout: 60s
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            string_match:
+              safe_regex:
+                regex: ".*ValidarRespuestaPreguntaSeguridad.*"
+        route:
+          cluster: transactional_soap
+          timeout: 60s
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            string_match:
+              safe_regex:
+                regex: ".*EjecutarTransaccionInternacional.*"
+        route:
+          cluster: transactional_soap
+          timeout: 60s
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            string_match:
+              safe_regex:
+                regex: ".*ConsultarModeloSeguridadPorTransaccion.*"
+        route:
+          cluster: transactional_soap
+          timeout: 60s
+#--------------------------------- REST ---------------------------------
+      - match:
+          safe_regex:
+            regex: ".*/autenticarusuariov2$"
+        route:
+          cluster: authentication_rest
+          timeout: 30s
+#--------------------------------- All Endpoints ---------------------------------
+      - match:
+          prefix: "/"
+          headers:
+          - name: SOAPAction
+            present_match: true
+        route:
+          cluster: allendpoints_soap
+          timeout: 60s
+      - match:
+          prefix: "/"
+        route:
+          cluster: allendpoints_rest
+          timeout: 30s
