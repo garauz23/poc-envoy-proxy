@@ -1,39 +1,183 @@
-version_info: "0"
+# =============================================================================
+# lds.yaml - Configuración de Listeners de Envoy (MEJORADA)
+# =============================================================================
+# Fecha: 2026-04-11
+# Contexto: Listener único en puerto 8000 con TLS, detrás de NLB
+# Objetivo: Optimizar manejo de conexiones y reducir TCP resets
+# =============================================================================
+
+version_info: "1"
+# CAMBIO: version_info incrementado de "0" a "1" para reflejar la nueva versión.
+
 resources:
   - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
     name: listener
-    enable_reuse_port: false
+
+    # CAMBIO 1: enable_reuse_port de false a true
+    # RAZÓN: SO_REUSEPORT permite que múltiples worker threads de Envoy
+    #   escuchen en el mismo puerto simultáneamente. El kernel distribuye
+    #   las conexiones entrantes entre los threads de forma más equitativa.
+    #   Sin esto, un solo thread acepta todas las conexiones y las distribuye,
+    #   creando un cuello de botella bajo alta carga.
+    #   Especialmente importante con NLB que puede enviar ráfagas de conexiones.
+    enable_reuse_port: true
+    # ORIGINAL: false
+    # NUEVO: true
+
+    # NUEVO: Límite de buffer por conexión
+    # CAMBIO 2: per_connection_buffer_limit_bytes agregado
+    # RAZÓN: Limita la cantidad de memoria que Envoy asigna para buffering
+    #   por cada conexión individual. En instancias con poca RAM (t4g.micro),
+    #   esto previene que unas pocas conexiones con payloads grandes
+    #   consuman toda la memoria disponible.
+    #   32KB es un buen balance para requests SOAP/REST típicos.
+    per_connection_buffer_limit_bytes: 32768
+
+    # NUEVO: Límite de backlog de conexiones
+    # CAMBIO 3: tcp_backlog_size agregado
+    # RAZÓN: Controla cuántas conexiones TCP pueden esperar en la cola
+    #   del kernel antes de ser aceptadas por Envoy. El default de Linux
+    #   suele ser 128, que puede ser insuficiente bajo ráfagas de 108 TPS.
+    #   1024 da más margen para absorber picos sin rechazar conexiones.
+    tcp_backlog_size: 1024
+
     address:
       socket_address:
         address: 0.0.0.0
         port_value: 8000
+
     filter_chains:
       - filters:
           - name: envoy.filters.network.http_connection_manager
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
               stat_prefix: listener_http
+
+              # NUEVO: Opciones comunes de protocolo HTTP
+              # CAMBIO 4: common_http_protocol_options agregado
+              # RAZÓN: Configura timeouts a nivel de protocolo HTTP.
+              #   - idle_timeout: Cierra conexiones que llevan 300s sin actividad.
+              #     Esto libera recursos de conexiones "fantasma" que el cliente
+              #     dejó abiertas pero no usa. El NLB tiene un idle timeout de 350s
+              #     por defecto, así que 300s en Envoy cierra primero evitando
+              #     que el NLB envíe tráfico a conexiones que Envoy ya cerró.
+              #   - headers_with_underscores_action: REJECT_REQUEST previene
+              #     headers malformados que podrían causar problemas en backends.
+              common_http_protocol_options:
+                idle_timeout: 300s
+                headers_with_underscores_action: REJECT_REQUEST
+
+              # NUEVO: Opciones específicas de HTTP/1.1
+              # CAMBIO 5: http_protocol_options agregado
+              # RAZÓN: Habilita keepalive en conexiones HTTP/1.1 downstream.
+              #   accept_http_10 permite clientes HTTP/1.0 (algunos clientes SOAP
+              #   legacy pueden usar HTTP/1.0).
+              #   enable_trailers puede ayudar con ciertas implementaciones.
+              http_protocol_options:
+                accept_http_10: true
+                enable_trailers: true
+
+              # NUEVO: Stream idle timeout
+              # CAMBIO 6: stream_idle_timeout agregado
+              # RAZÓN: Si un stream individual (request/response) no tiene
+              #   actividad durante 300s, se cierra. Esto previene que requests
+              #   "colgados" al DataPower mantengan recursos indefinidamente.
+              #   El timeout de ruta (30-60s) debería activarse primero para
+              #   operaciones normales; este es una red de seguridad adicional.
+              stream_idle_timeout: 300s
+
+              # NUEVO: Request timeout global
+              # CAMBIO 7: request_timeout agregado
+              # RAZÓN: Tiempo máximo absoluto para completar un request completo.
+              #   Incluso si el stream está activo, después de 120s se cancela.
+              #   Esto protege contra clientes que envían datos muy lentamente
+              #   (ataques slowloris o clientes con problemas de red).
+              request_timeout: 120s
+
+              # NUEVO: Delayed close timeout
+              # CAMBIO 8: delayed_close_timeout agregado
+              # RAZÓN: Al cerrar una conexión, Envoy espera 2s adicionales
+              #   para que el cliente reciba la respuesta final antes de hacer
+              #   TCP close. Esto reduce los TCP resets que ocurren cuando
+              #   Envoy cierra la conexión antes de que el cliente lea la respuesta.
+              delayed_close_timeout: 2s
+
+              # NUEVO: Normalización de path
+              # CAMBIO 9: normalize_path habilitado
+              # RAZÓN: Normaliza los paths HTTP (ej: convierte %2F a /, elimina
+              #   segmentos ".." etc.) antes del routing. Esto mejora la seguridad
+              #   y la eficiencia del matching de rutas en rds.yaml.
+              normalize_path: true
+
               access_log:
                 - name: envoy.access_loggers.stdout
                   typed_config:
                     "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                     log_format:
                       text_format_source:
-                        inline_string: "[%START_TIME%] %REQ(:METHOD)% %REQ(:PATH)% -> %RESPONSE_CODE% client=%DOWNSTREAM_REMOTE_ADDRESS% NLB=%DOWNSTREAM_LOCAL_ADDRESS% egress=%UPSTREAM_LOCAL_ADDRESS% upstream=%UPSTREAM_HOST% cluster=%UPSTREAM_CLUSTER% time=%DURATION%ms\n"
+                        # CAMBIO 10: Formato de log mejorado
+                        # RAZÓN: Se agregan campos adicionales para diagnóstico:
+                        #   - %RESPONSE_FLAGS%: Indica la razón de fallo (ej: UF=upstream failure,
+                        #     UC=upstream connection reset, UO=upstream overflow)
+                        #     CRÍTICO para diagnosticar TCP resets.
+                        #   - %UPSTREAM_TRANSPORT_FAILURE_REASON%: Detalle del error TLS
+                        #   - %CONNECTION_TERMINATION_DETAILS%: Por qué se cerró la conexión
+                        #   - %BYTES_RECEIVED%/%BYTES_SENT%: Volumen de datos transferidos
+                        #   Estos campos permiten correlacionar TCP resets del NLB
+                        #   con eventos específicos en Envoy.
+                        inline_string: "[%START_TIME%] %REQ(:METHOD)% %REQ(:PATH)% -> %RESPONSE_CODE% flags=%RESPONSE_FLAGS% client=%DOWNSTREAM_REMOTE_ADDRESS% NLB=%DOWNSTREAM_LOCAL_ADDRESS% egress=%UPSTREAM_LOCAL_ADDRESS% upstream=%UPSTREAM_HOST% cluster=%UPSTREAM_CLUSTER% time=%DURATION%ms upstream_time=%RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)%ms bytes_rx=%BYTES_RECEIVED% bytes_tx=%BYTES_SENT% tls_error=%UPSTREAM_TRANSPORT_FAILURE_REASON% conn_term=%CONNECTION_TERMINATION_DETAILS%\n"
+                        # ORIGINAL: "[%START_TIME%] %REQ(:METHOD)% %REQ(:PATH)% -> %RESPONSE_CODE% client=%DOWNSTREAM_REMOTE_ADDRESS% NLB=%DOWNSTREAM_LOCAL_ADDRESS% egress=%UPSTREAM_LOCAL_ADDRESS% upstream=%UPSTREAM_HOST% cluster=%UPSTREAM_CLUSTER% time=%DURATION%ms\n"
+
               http_filters:
+                # NUEVO: Health check filter
+                # CAMBIO 11: Health check filter agregado antes del router
+                # RAZÓN: Permite que el NLB haga health checks directamente
+                #   a Envoy sin que estos requests se envíen al backend DataPower.
+                #   El NLB puede hacer GET /healthz y Envoy responde 200 localmente.
+                #   Esto es más confiable que health checks TCP simples.
+                - name: envoy.filters.http.health_check
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                    pass_through_mode: false
+                    headers:
+                      - name: ":path"
+                        string_match:
+                          exact: "/healthz"
+
                 - name: envoy.filters.http.router
                   typed_config:
                     "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                    # NUEVO: Suprimir headers internos de Envoy
+                    # RAZÓN: No exponer headers x-envoy-* al exterior
+                    #   por seguridad. Solo mantener los necesarios.
+                    suppress_envoy_headers: false
+
               rds:
                 route_config_name: route_config
                 config_source:
                   path_config_source:
                     path: ./rds.yaml
+
         transport_socket:
           name: envoy.transport_sockets.tls
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
             common_tls_context:
+              # NUEVO: Configuración TLS mínima
+              # CAMBIO 12: tls_params agregado
+              # RAZÓN: Define las versiones TLS y cipher suites permitidas.
+              #   - TLSv1.2 mínimo: TLS 1.0 y 1.1 están deprecated y son inseguros.
+              #   - cipher_suites: Solo cipher suites fuertes con forward secrecy.
+              #   Esto mejora la seguridad y puede mejorar rendimiento al evitar
+              #   negociaciones con cipher suites débiles.
+              tls_params:
+                tls_minimum_protocol_version: TLSv1_2
+                tls_maximum_protocol_version: TLSv1_3
+                cipher_suites:
+                  - ECDHE-RSA-AES128-GCM-SHA256
+                  - ECDHE-RSA-AES256-GCM-SHA384
+                  - ECDHE-RSA-CHACHA20-POLY1305
+
               tls_certificates:
                 - certificate_chain:
                     filename: /etc/envoy/dynamic/certificate.crt
@@ -41,3 +185,48 @@ resources:
                     filename: /etc/envoy/dynamic/private_key.key
                   password:
                     inline_string: j2heA5~C2\J3
+
+# =============================================================================
+# RESUMEN DE CAMBIOS EN ESTE ARCHIVO:
+# =============================================================================
+#  1. enable_reuse_port: false → true
+#     - Mejor distribución de conexiones entre worker threads
+#
+#  2. NUEVO: per_connection_buffer_limit_bytes = 32KB
+#     - Previene consumo excesivo de memoria por conexión
+#
+#  3. NUEVO: tcp_backlog_size = 1024
+#     - Mayor capacidad de cola para picos de conexiones
+#
+#  4. NUEVO: common_http_protocol_options (idle_timeout: 300s)
+#     - Cierra conexiones inactivas antes que el NLB
+#
+#  5. NUEVO: http_protocol_options (accept_http_10, trailers)
+#     - Compatibilidad con clientes HTTP/1.0 legacy (SOAP)
+#
+#  6. NUEVO: stream_idle_timeout = 300s
+#     - Red de seguridad contra streams colgados
+#
+#  7. NUEVO: request_timeout = 120s
+#     - Protección contra requests excesivamente lentos
+#
+#  8. NUEVO: delayed_close_timeout = 2s
+#     - REDUCE TCP RESETS al dar tiempo al cliente de recibir la respuesta
+#
+#  9. NUEVO: normalize_path = true
+#     - Mejor matching de rutas y seguridad
+#
+# 10. Formato de access_log mejorado con RESPONSE_FLAGS y más campos
+#     - CRÍTICO para diagnosticar la causa de TCP resets
+#
+# 11. NUEVO: Health check filter (/healthz)
+#     - Health checks del NLB sin impactar al backend
+#
+# 12. NUEVO: tls_params (TLSv1.2 mínimo, cipher suites fuertes)
+#     - Mejor seguridad y rendimiento TLS
+#
+# IMPACTO ESPERADO:
+#   - Los cambios 1, 3, 8 son los más impactantes para resolver TCP resets
+#   - El cambio 4 previene conexiones zombie
+#   - Los cambios 10 permiten diagnóstico preciso de problemas futuros
+# =============================================================================

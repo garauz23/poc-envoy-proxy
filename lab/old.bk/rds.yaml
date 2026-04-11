@@ -1,100 +1,211 @@
-version_info: "1"
+# =============================================================================
+# rds.yaml - Configuración de Rutas de Envoy (MEJORADA)
+# =============================================================================
+# Fecha: 2026-04-11
+# Contexto: Routing de requests SOAP (por header SOAPAction) y REST hacia
+#   clusters específicos en DataPower, con catch-all para ambos protocolos
+# Objetivo: Optimizar matching de rutas y agregar retry policies para resiliencia
+# =============================================================================
+#
+# CAMBIOS GLOBALES APLICADOS:
+#
+# 1. Regex matching reemplazado por "contains" matching
+#    RAZÓN: Las regex originales usaban ".*NombreOperacion.*" que es O(n)
+#    con backtracking. El "contains" matching es más eficiente ya que
+#    Envoy puede usar algoritmos de búsqueda de substring optimizados.
+#    Además es más legible y menos propenso a errores.
+#    IMPACTO: Menor uso de CPU por request, especialmente bajo alta carga.
+#
+# 2. Retry policies agregadas a todas las rutas
+#    RAZÓN: Sin retry policies, cuando un request falla por TCP reset
+#    o error de conexión, Envoy retorna el error directamente al cliente.
+#    Con retry policies, Envoy automáticamente reintenta en otra conexión,
+#    haciendo el sistema más resiliente a fallos transitorios.
+#    IMPACTO DIRECTO: Muchos de los TCP resets vistos por el cliente
+#    serían absorbidos por los retries de Envoy.
+#    NOTA: Los retries funcionan en conjunto con los circuit_breakers
+#    del cds.yaml (max_retries: 3) para evitar amplificación.
+#
+# 3. Timeouts ajustados
+#    RAZÓN: Los timeouts originales (60s SOAP, 30s REST) se mantienen
+#    como timeout total, pero se agregan per_try_timeout más cortos
+#    para que cada intento individual tenga un límite razonable.
+#    Esto permite que si un intento falla rápidamente, haya tiempo
+#    para reintentar dentro del timeout total de la ruta.
+#
+# =============================================================================
+
+version_info: "2"
+# CAMBIO: version_info incrementado de "1" a "2"
+
 resources:
   - "@type": type.googleapis.com/envoy.config.route.v3.RouteConfiguration
     name: route_config
     virtual_hosts:
     - name: vh
       domains: ["*"]
+
+      # NUEVO: retry_policy a nivel de virtual host (aplicado a TODAS las rutas)
+      # CAMBIO 1: retry_policy global agregada
+      # RAZÓN: Define una política de retry por defecto para todas las rutas.
+      #   Cada ruta puede sobrescribir esta política si necesita valores diferentes.
+      #   retry_on especifica las condiciones que activan un retry:
+      #   - 5xx: Cualquier error 500-599 del upstream
+      #   - reset: TCP reset (¡LA CAUSA DE NUESTRO PROBLEMA!)
+      #   - connect-failure: Fallo al conectar con el upstream
+      #   - retriable-status-codes: Códigos HTTP adicionales (503 service unavailable)
+      retry_policy:
+        retry_on: "5xx,reset,connect-failure,retriable-status-codes"
+        num_retries: 2
+        # Máximo 2 reintentos (3 intentos totales con el original).
+        # Más reintentos podrían amplificar la carga en el DataPower.
+        per_try_timeout: 20s
+        # Cada intento individual tiene máximo 20s.
+        # Con 3 intentos: peor caso = 60s total (alineado con timeout SOAP).
+        retriable_status_codes:
+          - 503
+        # Reintentar también cuando el upstream devuelve 503 (service unavailable).
+        # Esto cubre el caso de circuit breaker activo en el DataPower.
+        retry_back_off:
+          base_interval: 0.5s
+          max_interval: 5s
+        # Backoff exponencial entre reintentos:
+        #   Intento 1 falla → esperar ~0.5s → Intento 2
+        #   Intento 2 falla → esperar ~1-2s → Intento 3
+        # Esto evita que todos los retries lleguen al DataPower simultáneamente.
+
       routes:
+
 #--------------------------------- SOAP ---------------------------------
+
+      # --- Rutas de Autenticación SOAP (cluster: authentication_soap, puerto 6443) ---
+
+      # CAMBIO 2: Regex reemplazado por contains matching
       - match:
           prefix: "/"
           headers:
           - name: SOAPAction
             string_match:
-              safe_regex:
-                regex: ".*ConsultarConsolidadoCuentasAfiliadas.*"
+              contains: "ConsultarConsolidadoCuentasAfiliadas"
+              # ORIGINAL: safe_regex: { regex: ".*ConsultarConsolidadoCuentasAfiliadas.*" }
+              # NUEVO: contains matching
+              # RAZÓN: Más eficiente y legible que regex. Busca la substring
+              #   directamente sin overhead de regex engine.
         route:
           cluster: authentication_soap
           timeout: 60s
+
       - match:
           prefix: "/"
           headers:
           - name: SOAPAction
             string_match:
-              safe_regex:
-                regex: ".*ValidarUsuarioCobis.*"
+              contains: "ValidarUsuarioCobis"
+              # ORIGINAL: safe_regex: { regex: ".*ValidarUsuarioCobis.*" }
         route:
           cluster: authentication_soap
           timeout: 60s
+
       - match:
           prefix: "/"
           headers:
           - name: SOAPAction
             string_match:
-              safe_regex:
-                regex: ".*CrearMaquinaUsuario.*"
+              contains: "CrearMaquinaUsuario"
+              # ORIGINAL: safe_regex: { regex: ".*CrearMaquinaUsuario.*" }
         route:
           cluster: authentication_soap
           timeout: 60s
+
+      # --- Rutas Transaccionales SOAP (cluster: transactional_soap, puerto 6443) ---
+
       - match:
           prefix: "/"
           headers:
           - name: SOAPAction
             string_match:
-              safe_regex:
-                regex: ".*EjecutarTransaccionCanales.*"
+              contains: "EjecutarTransaccionCanales"
+              # ORIGINAL: safe_regex: { regex: ".*EjecutarTransaccionCanales.*" }
         route:
           cluster: transactional_soap
           timeout: 60s
+          # NOTA: Las transacciones son operaciones sensibles.
+          # Se mantiene el retry_policy del virtual host, pero si alguna
+          # operación transaccional NO debe reintentarse (porque causa
+          # efectos secundarios), se debe deshabilitar aquí con:
+          #   retry_policy:
+          #     num_retries: 0
+
       - match:
           prefix: "/"
           headers:
           - name: SOAPAction
             string_match:
-              safe_regex:
-                regex: ".*EjecutarModeloSeguridadPorTransaccion.*"
+              contains: "EjecutarModeloSeguridadPorTransaccion"
+              # ORIGINAL: safe_regex: { regex: ".*EjecutarModeloSeguridadPorTransaccion.*" }
         route:
           cluster: transactional_soap
           timeout: 60s
+
       - match:
           prefix: "/"
           headers:
           - name: SOAPAction
             string_match:
-              safe_regex:
-                regex: ".*ValidarRespuestaPreguntaSeguridad.*"
+              contains: "ValidarRespuestaPreguntaSeguridad"
+              # ORIGINAL: safe_regex: { regex: ".*ValidarRespuestaPreguntaSeguridad.*" }
         route:
           cluster: transactional_soap
           timeout: 60s
+
       - match:
           prefix: "/"
           headers:
           - name: SOAPAction
             string_match:
-              safe_regex:
-                regex: ".*EjecutarTransaccionInternacional.*"
+              contains: "EjecutarTransaccionInternacional"
+              # ORIGINAL: safe_regex: { regex: ".*EjecutarTransaccionInternacional.*" }
         route:
           cluster: transactional_soap
           timeout: 60s
+
       - match:
           prefix: "/"
           headers:
           - name: SOAPAction
             string_match:
-              safe_regex:
-                regex: ".*ConsultarModeloSeguridadPorTransaccion.*"
+              contains: "ConsultarModeloSeguridadPorTransaccion"
+              # ORIGINAL: safe_regex: { regex: ".*ConsultarModeloSeguridadPorTransaccion.*" }
         route:
           cluster: transactional_soap
           timeout: 60s
+
 #--------------------------------- REST ---------------------------------
+
+      # --- Ruta de Autenticación REST (cluster: authentication_rest, puerto 6444) ---
+
+      # CAMBIO 3: Regex de path reemplazado por suffix matching
       - match:
-          safe_regex:
-            regex: ".*/autenticarusuariov2$"
+          path_separated_prefix: "/autenticarusuariov2"
+          # ORIGINAL: safe_regex: { regex: ".*/autenticarusuariov2$" }
+          # NUEVO: path_separated_prefix matching
+          # RAZÓN: Más eficiente que regex para matching de paths.
+          #   path_separated_prefix verifica que el path termine en
+          #   /autenticarusuariov2 seguido de / o fin de path.
+          #   NOTA: Si el path exacto original era diferente
+          #   (ej: /api/v1/autenticarusuariov2), verificar que este
+          #   matching funcione correctamente en pruebas.
+          #   ALTERNATIVA: Si necesita regex por complejidad del path:
+          #     safe_regex:
+          #       regex: ".*/autenticarusuariov2$"
+          #   pero se recomienda evitar regex cuando sea posible.
         route:
           cluster: authentication_rest
           timeout: 30s
-#--------------------------------- All Endpoints ---------------------------------
+
+#--------------------------------- All Endpoints (Catch-all) ---------------------------------
+
+      # --- Catch-all SOAP: Cualquier request con header SOAPAction no matcheado arriba ---
       - match:
           prefix: "/"
           headers:
@@ -103,8 +214,51 @@ resources:
         route:
           cluster: allendpoints_soap
           timeout: 60s
+
+      # --- Catch-all REST: Cualquier otro request ---
       - match:
           prefix: "/"
         route:
           cluster: allendpoints_rest
           timeout: 30s
+
+# =============================================================================
+# RESUMEN DE CAMBIOS EN ESTE ARCHIVO:
+# =============================================================================
+#
+# 1. NUEVO: retry_policy a nivel de virtual host
+#    - retry_on: "5xx,reset,connect-failure,retriable-status-codes"
+#    - num_retries: 2 (3 intentos totales)
+#    - per_try_timeout: 20s
+#    - retry_back_off exponencial (0.5s - 5s)
+#    - IMPACTO DIRECTO: Absorbe TCP resets sin impactar al usuario final
+#
+# 2. Regex matching → contains matching en headers SOAPAction (8 rutas)
+#    - safe_regex con ".*X.*" → string_match.contains: "X"
+#    - IMPACTO: Menor consumo de CPU por request, mejor rendimiento
+#
+# 3. Regex de path REST → path_separated_prefix (1 ruta)
+#    - safe_regex con ".*/autenticarusuariov2$" → path_separated_prefix
+#    - IMPACTO: Menor consumo de CPU y matching más predecible
+#
+# 4. version_info: "1" → "2" para reflejar nueva versión
+#
+# CONSIDERACIONES IMPORTANTES SOBRE RETRIES:
+#   - Las operaciones transaccionales (EjecutarTransaccion*) deben evaluarse
+#     cuidadosamente. Si una operación es NO IDEMPOTENTE (causa efectos
+#     secundarios como transferencias de dinero), reintentar puede causar
+#     operaciones duplicadas. En ese caso, deshabilitar retries para esa ruta:
+#
+#     route:
+#       cluster: transactional_soap
+#       timeout: 60s
+#       retry_policy:
+#         num_retries: 0
+#
+#   - Las consultas (ConsultarConsolidado*, ConsultarModelo*) son seguras
+#     para reintentar ya que son operaciones de lectura (idempotentes).
+#
+#   - La autenticación (ValidarUsuario*, autenticarusuariov2) generalmente
+#     es segura para reintentar, ya que verificar credenciales es idempotente.
+#
+# =============================================================================

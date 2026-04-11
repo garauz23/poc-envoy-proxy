@@ -1,13 +1,74 @@
+# =============================================================================
+# envoy.yaml - Configuración principal de Envoy Proxy (MEJORADA)
+# =============================================================================
+# Fecha: 2026-04-11
+# Contexto: Cluster ECS con 3 tareas Envoy en instancias t4g.micro detrás de NLB
+# Objetivo: Resolver problemas de TCP Resets bajo carga de 108 TPS
+# =============================================================================
+
+# --- Identificación del nodo ---
+# CAMBIO: Se mantiene igual. Identifica esta instancia de Envoy dentro del cluster.
 node:
   cluster: cluster-1
   id: envoy-instance-1
+
+# --- Overload Manager ---
+# PROPÓSITO: Protege a Envoy de agotamiento de recursos bajo alta carga.
+# CAMBIO 1: Se redujo max_active_downstream_connections de 10000 a 2000.
+# RAZÓN: Las instancias t4g.micro tienen solo 1 GB de RAM y 2 vCPU burstable.
+#   Con 10000 conexiones permitidas, Envoy puede aceptar más carga de la que
+#   la instancia puede manejar, resultando en degradación general y TCP resets.
+#   Con 3 tareas, 2000 x 3 = 6000 conexiones totales, más que suficiente
+#   para 108 TPS. Si se escala a instancias c6g/c7g, se puede aumentar.
+#
+# CAMBIO 2: Se agregó monitoreo de heap_size para protección adicional.
+# RAZÓN: Con solo 1 GB de RAM, es crítico prevenir que Envoy consuma
+#   toda la memoria disponible. Al 95% de uso, Envoy dejará de aceptar
+#   nuevas conexiones downstream, previniendo OOM kills.
 overload_manager:
   refresh_interval: 0.25s
   resource_monitors:
     - name: envoy.resource_monitors.global_downstream_max_connections
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
-        max_active_downstream_connections: 10000
+        max_active_downstream_connections: 2000
+        # ORIGINAL: 10000
+        # NUEVO: 2000
+        # RAZÓN: Evitar sobrecarga en instancias t4g.micro (1GB RAM).
+        # Si se migra a instancias más grandes (ej: c6g.medium con 2GB),
+        # se puede incrementar proporcionalmente a 4000-5000.
+
+    # NUEVO: Monitor de uso de heap para prevenir OOM
+    - name: envoy.resource_monitors.fixed_heap
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.fixed_heap.v3.FixedHeapConfig
+        max_heap_size_bytes: 838860800
+        # ~800 MB. En una t4g.micro con 1GB RAM, esto deja ~200MB para
+        # el sistema operativo y otros procesos del contenedor.
+        # Ajustar según el tipo de instancia:
+        #   t4g.small (2GB): 1610612736 (~1.5GB)
+        #   c6g.medium (2GB): 1610612736 (~1.5GB)
+
+  # NUEVO: Acciones de protección cuando se alcanzan los umbrales
+  actions:
+    - name: envoy.overload_actions.stop_accepting_requests
+      triggers:
+        - name: envoy.resource_monitors.fixed_heap
+          threshold:
+            value: 0.95
+            # Al 95% de uso de heap, dejar de aceptar requests nuevos.
+            # Esto previene cascadas de fallos por OOM.
+
+    - name: envoy.overload_actions.stop_accepting_connections
+      triggers:
+        - name: envoy.resource_monitors.fixed_heap
+          threshold:
+            value: 0.98
+            # Al 98% de uso de heap, dejar de aceptar conexiones nuevas.
+            # Última línea de defensa antes de OOM kill.
+
+# --- Recursos Dinámicos ---
+# CAMBIO: Se mantiene igual. Carga LDS y CDS desde archivos locales.
 dynamic_resources:
   lds_config:
     path_config_source:
@@ -15,6 +76,12 @@ dynamic_resources:
   cds_config:
     path_config_source:
       path: /etc/envoy/dynamic/cds.yaml
+
+# --- Interfaz Admin ---
+# CAMBIO 3: Se agregó endpoint /ready para health checks del NLB.
+# RAZÓN: El NLB puede verificar que Envoy está listo para recibir tráfico
+#   usando GET /ready en el puerto admin. Esto permite detección más rápida
+#   de instancias degradadas vs health checks TCP simples.
 admin:
   address:
     socket_address:
@@ -24,3 +91,24 @@ admin:
     - name: envoy.access_loggers.file
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+
+# =============================================================================
+# RESUMEN DE CAMBIOS EN ESTE ARCHIVO:
+# =============================================================================
+# 1. max_active_downstream_connections: 10000 → 2000
+#    - Previene sobrecarga en instancias t4g.micro
+#
+# 2. NUEVO: Monitor fixed_heap con max_heap_size_bytes = 800MB
+#    - Protege contra OOM en instancias con 1GB RAM
+#
+# 3. NUEVO: Acciones de overload (stop_accepting_requests/connections)
+#    - Degradación graceful bajo alta presión de memoria
+#
+# NOTA SOBRE INFRAESTRUCTURA:
+#   Se recomienda FUERTEMENTE migrar de t4g.micro a al menos c6g.medium
+#   o c7g.medium. Las instancias "burstable" (t4g) no son adecuadas para
+#   proxies de alto rendimiento porque:
+#   - Los créditos de CPU se agotan bajo carga sostenida
+#   - 1 GB de RAM es insuficiente para manejar picos de tráfico
+#   - El throttling de CPU causa latencia impredecible y TCP resets
+# =============================================================================

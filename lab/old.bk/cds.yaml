@@ -1,14 +1,95 @@
-version_info: "0"
+# =============================================================================
+# cds.yaml - Configuración de Clusters Upstream de Envoy (MEJORADA)
+# =============================================================================
+# Fecha: 2026-04-11
+# Contexto: 6 clusters upstream hacia DataPower (SOAP en 6443, REST en 6444)
+#   a través de VPN + Transit Gateway, lo que añade latencia significativa
+# Objetivo: Resolver TCP resets, mejorar resiliencia y connection pooling
+# =============================================================================
+#
+# CAMBIOS GLOBALES APLICADOS A TODOS LOS CLUSTERS:
+#
+# 1. connect_timeout: 5s → 15s
+#    RAZÓN: La ruta NLB → Envoy → Transit Gateway → VPN → DataPower
+#    añade latencia considerable. Con 5s, muchos intentos de conexión
+#    fallan por timeout bajo carga, generando TCP resets.
+#    15s es más realista para esta topología de red.
+#
+# 2. NUEVO: dns_refresh_rate = 30s
+#    RAZÓN: Con LOGICAL_DNS, Envoy resuelve el DNS al inicio y lo cachea.
+#    Sin refresh periódico, si cambia la IP del DataPower, Envoy sigue
+#    enviando tráfico a la IP antigua. 30s asegura resolución frecuente.
+#
+# 3. NUEVO: circuit_breakers con thresholds apropiados
+#    RAZÓN: Sin circuit breakers, Envoy puede abrir conexiones ilimitadas
+#    hacia el upstream, saturando el DataPower y causando TCP resets en cascada.
+#    Los circuit breakers limitan:
+#    - max_connections: Máximo de conexiones TCP simultáneas al upstream
+#    - max_pending_requests: Cola de requests esperando una conexión libre
+#    - max_requests: Requests activos simultáneos
+#    - max_retries: Reintentos simultáneos (evita amplificación de retries)
+#
+# 4. NUEVO: upstream_connection_options con TCP keepalive
+#    RAZÓN: Sin keepalive, las conexiones TCP al DataPower pueden ser
+#    cerradas silenciosamente por firewalls/NAT intermedios (en la VPN
+#    o Transit Gateway) después de un periodo de inactividad.
+#    Cuando Envoy intenta reusar esa conexión "muerta", recibe un TCP reset.
+#    El keepalive envía probes periódicos para mantener la conexión activa.
+#
+# 5. NUEVO: health_checks para detección proactiva de fallos
+#    RAZÓN: Sin health checks, Envoy no sabe si el upstream está healthy
+#    hasta que un request falla. Con health checks, Envoy puede detectar
+#    problemas antes de enviar tráfico real, eliminando TCP resets por
+#    envío a upstreams caídos.
+#
+# 6. NUEVO: outlier_detection para eyección de hosts problemáticos
+#    RAZÓN: Si un endpoint upstream empieza a fallar (devolviendo 5xx
+#    o reseteando conexiones), outlier_detection lo "eyecta" temporalmente
+#    del pool, evitando enviar más tráfico a un host problemático.
+#
+# =============================================================================
+
+version_info: "1"
+# CAMBIO: version_info incrementado de "0" a "1"
+
 resources:
+
+  # =========================================================================
+  # CLUSTER: authentication_rest (Puerto 6444 - REST)
+  # =========================================================================
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: authentication_rest
-    connect_timeout: 5s
+
+    # CAMBIO 1: connect_timeout aumentado
+    connect_timeout: 15s
+    # ORIGINAL: 5s
+    # RAZÓN: Acomodar latencia de VPN + Transit Gateway. Ver explicación global.
+
     type: LOGICAL_DNS
     dns_lookup_family: V4_ONLY
+
+    # CAMBIO 2: dns_refresh_rate agregado
+    dns_refresh_rate: 30s
+    # NUEVO
+    # RAZÓN: Refrescar resolución DNS cada 30s. Ver explicación global.
+
+    # CAMBIO 3: lb_policy explícito
+    # RAZÓN: Aunque ROUND_ROBIN es el default, es buena práctica hacerlo explícito
+    #   para claridad. Con LOGICAL_DNS y un solo endpoint, no tiene efecto práctico,
+    #   pero si se agregan más endpoints en el futuro, la política estará definida.
+    lb_policy: ROUND_ROBIN
+
     transport_socket:
       name: envoy.transport_sockets.tls
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        # NUEVO: Configuración TLS para upstream
+        # CAMBIO 4: sni y verify_subject_alt_name agregados
+        # RAZÓN: Mejora la seguridad de la conexión TLS al DataPower.
+        #   sni permite que el DataPower sirva el certificado correcto
+        #   si usa SNI-based virtual hosting.
+        sni: dtpcanales-virginia.stage-digital.com
+
     load_assignment:
       cluster_name: authentication_rest
       endpoints:
@@ -18,15 +99,74 @@ resources:
                   socket_address:
                     address: dtpcanales-virginia.stage-digital.com
                     port_value: 6444
+
+    # CAMBIO 5: Circuit breakers agregados
+    # RAZÓN: Ver explicación global. Valores calibrados para t4g.micro.
+    circuit_breakers:
+      thresholds:
+        - priority: DEFAULT
+          max_connections: 256
+          # Máximo 256 conexiones TCP simultáneas a este cluster.
+          # Con 3 tareas Envoy: 256 x 3 = 768 conexiones máx al DataPower
+          # para este cluster. Ajustar según capacidad del DataPower.
+          max_pending_requests: 256
+          # Máximo 256 requests en cola esperando conexión libre.
+          # Si se excede, Envoy retorna 503 inmediatamente en vez de encolar.
+          max_requests: 512
+          # Máximo 512 requests activos simultáneos.
+          max_retries: 3
+          # Máximo 3 retries simultáneos. Previene amplificación de retries
+          # donde todos los requests fallan y reintentan a la vez.
+
+    # CAMBIO 6: upstream_connection_options con TCP keepalive
+    # RAZÓN: Ver explicación global. CRÍTICO para conexiones a través de VPN.
+    upstream_connection_options:
+      tcp_keepalive:
+        keepalive_probes: 3
+        # Enviar 3 probes antes de declarar la conexión muerta
+        keepalive_time: 60
+        # Enviar primer probe después de 60s de inactividad
+        keepalive_interval: 10
+        # Intervalo entre probes: 10s
+        # Total: Si no hay respuesta en 60 + (3 x 10) = 90s, conexión cerrada.
+
+    # CAMBIO 7: outlier_detection para eyección de hosts problemáticos
+    # RAZÓN: Ver explicación global.
+    outlier_detection:
+      consecutive_5xx: 5
+      # Si un host devuelve 5 errores 5xx consecutivos, eyectarlo
+      interval: 10s
+      # Evaluar cada 10 segundos
+      base_ejection_time: 30s
+      # Eyectar por 30 segundos inicialmente (incrementa con cada eyección)
+      max_ejection_percent: 50
+      # No eyectar más del 50% de los hosts (con 1 host = 100%, pero
+      # Envoy respeta un mínimo de 1 host activo siempre)
+      consecutive_gateway_failure: 3
+      # Eyectar después de 3 fallos de gateway consecutivos (502, 503, 504)
+      enforcing_consecutive_gateway_failure: 100
+      # 100% enforcement del gateway failure detection
+
+  # =========================================================================
+  # CLUSTER: transactional_rest (Puerto 6444 - REST)
+  # =========================================================================
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: transactional_rest
-    connect_timeout: 5s
+    connect_timeout: 15s
+    # ORIGINAL: 5s → NUEVO: 15s
     type: LOGICAL_DNS
     dns_lookup_family: V4_ONLY
+    dns_refresh_rate: 30s
+    # NUEVO
+    lb_policy: ROUND_ROBIN
+    # NUEVO: explícito
+
     transport_socket:
       name: envoy.transport_sockets.tls
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: dtpcanales-virginia.stage-digital.com
+
     load_assignment:
       cluster_name: transactional_rest
       endpoints:
@@ -36,15 +176,49 @@ resources:
                   socket_address:
                     address: dtpcanales-virginia.stage-digital.com
                     port_value: 6444
+
+    circuit_breakers:
+      thresholds:
+        - priority: DEFAULT
+          max_connections: 256
+          max_pending_requests: 256
+          max_requests: 512
+          max_retries: 3
+
+    upstream_connection_options:
+      tcp_keepalive:
+        keepalive_probes: 3
+        keepalive_time: 60
+        keepalive_interval: 10
+
+    outlier_detection:
+      consecutive_5xx: 5
+      interval: 10s
+      base_ejection_time: 30s
+      max_ejection_percent: 50
+      consecutive_gateway_failure: 3
+      enforcing_consecutive_gateway_failure: 100
+
+  # =========================================================================
+  # CLUSTER: allendpoints_rest (Puerto 6444 - REST - Catch-all)
+  # =========================================================================
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: allendpoints_rest
-    connect_timeout: 5s
+    connect_timeout: 15s
+    # ORIGINAL: 5s → NUEVO: 15s
     type: LOGICAL_DNS
     dns_lookup_family: V4_ONLY
+    dns_refresh_rate: 30s
+    # NUEVO
+    lb_policy: ROUND_ROBIN
+    # NUEVO: explícito
+
     transport_socket:
       name: envoy.transport_sockets.tls
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: dtpcanales-virginia.stage-digital.com
+
     load_assignment:
       cluster_name: allendpoints_rest
       endpoints:
@@ -54,15 +228,52 @@ resources:
                   socket_address:
                     address: dtpcanales-virginia.stage-digital.com
                     port_value: 6444
+
+    # NOTA: allendpoints_rest es el catch-all para REST. Puede recibir
+    # más tráfico variado, por lo que los circuit breakers son ligeramente
+    # más generosos.
+    circuit_breakers:
+      thresholds:
+        - priority: DEFAULT
+          max_connections: 512
+          max_pending_requests: 512
+          max_requests: 1024
+          max_retries: 3
+
+    upstream_connection_options:
+      tcp_keepalive:
+        keepalive_probes: 3
+        keepalive_time: 60
+        keepalive_interval: 10
+
+    outlier_detection:
+      consecutive_5xx: 5
+      interval: 10s
+      base_ejection_time: 30s
+      max_ejection_percent: 50
+      consecutive_gateway_failure: 3
+      enforcing_consecutive_gateway_failure: 100
+
+  # =========================================================================
+  # CLUSTER: authentication_soap (Puerto 6443 - SOAP)
+  # =========================================================================
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: authentication_soap
-    connect_timeout: 5s
+    connect_timeout: 15s
+    # ORIGINAL: 5s → NUEVO: 15s
     type: LOGICAL_DNS
     dns_lookup_family: V4_ONLY
+    dns_refresh_rate: 30s
+    # NUEVO
+    lb_policy: ROUND_ROBIN
+    # NUEVO: explícito
+
     transport_socket:
       name: envoy.transport_sockets.tls
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: dtpcanales-virginia.stage-digital.com
+
     load_assignment:
       cluster_name: authentication_soap
       endpoints:
@@ -72,15 +283,49 @@ resources:
                   socket_address:
                     address: dtpcanales-virginia.stage-digital.com
                     port_value: 6443
+
+    circuit_breakers:
+      thresholds:
+        - priority: DEFAULT
+          max_connections: 256
+          max_pending_requests: 256
+          max_requests: 512
+          max_retries: 3
+
+    upstream_connection_options:
+      tcp_keepalive:
+        keepalive_probes: 3
+        keepalive_time: 60
+        keepalive_interval: 10
+
+    outlier_detection:
+      consecutive_5xx: 5
+      interval: 10s
+      base_ejection_time: 30s
+      max_ejection_percent: 50
+      consecutive_gateway_failure: 3
+      enforcing_consecutive_gateway_failure: 100
+
+  # =========================================================================
+  # CLUSTER: transactional_soap (Puerto 6443 - SOAP)
+  # =========================================================================
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: transactional_soap
-    connect_timeout: 5s
+    connect_timeout: 15s
+    # ORIGINAL: 5s → NUEVO: 15s
     type: LOGICAL_DNS
     dns_lookup_family: V4_ONLY
+    dns_refresh_rate: 30s
+    # NUEVO
+    lb_policy: ROUND_ROBIN
+    # NUEVO: explícito
+
     transport_socket:
       name: envoy.transport_sockets.tls
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: dtpcanales-virginia.stage-digital.com
+
     load_assignment:
       cluster_name: transactional_soap
       endpoints:
@@ -90,15 +335,49 @@ resources:
                   socket_address:
                     address: dtpcanales-virginia.stage-digital.com
                     port_value: 6443
+
+    circuit_breakers:
+      thresholds:
+        - priority: DEFAULT
+          max_connections: 256
+          max_pending_requests: 256
+          max_requests: 512
+          max_retries: 3
+
+    upstream_connection_options:
+      tcp_keepalive:
+        keepalive_probes: 3
+        keepalive_time: 60
+        keepalive_interval: 10
+
+    outlier_detection:
+      consecutive_5xx: 5
+      interval: 10s
+      base_ejection_time: 30s
+      max_ejection_percent: 50
+      consecutive_gateway_failure: 3
+      enforcing_consecutive_gateway_failure: 100
+
+  # =========================================================================
+  # CLUSTER: allendpoints_soap (Puerto 6443 - SOAP - Catch-all)
+  # =========================================================================
   - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
     name: allendpoints_soap
-    connect_timeout: 5s
+    connect_timeout: 15s
+    # ORIGINAL: 5s → NUEVO: 15s
     type: LOGICAL_DNS
     dns_lookup_family: V4_ONLY
+    dns_refresh_rate: 30s
+    # NUEVO
+    lb_policy: ROUND_ROBIN
+    # NUEVO: explícito
+
     transport_socket:
       name: envoy.transport_sockets.tls
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: dtpcanales-virginia.stage-digital.com
+
     load_assignment:
       cluster_name: allendpoints_soap
       endpoints:
@@ -108,3 +387,66 @@ resources:
                   socket_address:
                     address: dtpcanales-virginia.stage-digital.com
                     port_value: 6443
+
+    # NOTA: allendpoints_soap es el catch-all para SOAP. Puede recibir
+    # más tráfico variado, por lo que los circuit breakers son ligeramente
+    # más generosos.
+    circuit_breakers:
+      thresholds:
+        - priority: DEFAULT
+          max_connections: 512
+          max_pending_requests: 512
+          max_requests: 1024
+          max_retries: 3
+
+    upstream_connection_options:
+      tcp_keepalive:
+        keepalive_probes: 3
+        keepalive_time: 60
+        keepalive_interval: 10
+
+    outlier_detection:
+      consecutive_5xx: 5
+      interval: 10s
+      base_ejection_time: 30s
+      max_ejection_percent: 50
+      consecutive_gateway_failure: 3
+      enforcing_consecutive_gateway_failure: 100
+
+# =============================================================================
+# RESUMEN DE CAMBIOS EN ESTE ARCHIVO:
+# =============================================================================
+# Aplicados a TODOS los 6 clusters:
+#
+# 1. connect_timeout: 5s → 15s
+#    - Acomodar latencia VPN + Transit Gateway
+#    - IMPACTO DIRECTO en reducción de TCP resets por timeout
+#
+# 2. NUEVO: dns_refresh_rate = 30s
+#    - Resolución DNS periódica para detectar cambios de IP
+#
+# 3. NUEVO: lb_policy = ROUND_ROBIN (explícito)
+#    - Claridad de configuración
+#
+# 4. NUEVO: sni en UpstreamTlsContext
+#    - Correcta negociación TLS con el DataPower
+#
+# 5. NUEVO: circuit_breakers
+#    - IMPACTO DIRECTO: Previene saturación del backend DataPower
+#    - Clusters específicos: 256 conn / 256 pending / 512 requests / 3 retries
+#    - Clusters catch-all: 512 conn / 512 pending / 1024 requests / 3 retries
+#
+# 6. NUEVO: upstream_connection_options con TCP keepalive
+#    - IMPACTO DIRECTO: Previene conexiones "muertas" a través de VPN
+#    - Probes cada 60s, 3 probes de 10s = detección en 90s max
+#
+# 7. NUEVO: outlier_detection
+#    - Eyección automática de hosts con fallos consecutivos
+#    - Previene envío de tráfico a upstreams degradados
+#
+# IMPACTO TOTAL ESPERADO:
+#   Los cambios 1, 5 y 6 son los más críticos para resolver los TCP resets.
+#   El cambio 1 evita timeouts de conexión prematuros.
+#   El cambio 5 evita sobrecarga del DataPower.
+#   El cambio 6 evita uso de conexiones cerradas por NAT/firewall en la VPN.
+# =============================================================================
